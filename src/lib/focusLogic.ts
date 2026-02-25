@@ -268,7 +268,8 @@ export function endBlock(
         blockSelections.length > 0 && blockSelections.every((s) => !!s.doneAt);
 
     const nextStatus = (opts?.status ?? 'COMPLETED') as 'COMPLETED' | 'INTERRUPTED';
-    const endReason = (opts?.endReason ?? null) ? String(opts.endReason).slice(0, 140) : null;
+    const rawEndReason = opts?.endReason ?? null;
+    const endReason = rawEndReason != null ? String(rawEndReason).slice(0, 140) : null;
 
     const blocks = state.blocks.map((b) =>
         b.id === blockId
