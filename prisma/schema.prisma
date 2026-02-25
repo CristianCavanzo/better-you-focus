@@ -1,201 +1,220 @@
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 enum TaskStatus {
-    PENDING
-    DONE
-    ARCHIVED
+  PENDING
+  DONE
+  ARCHIVED
 }
 
 enum BlockStatus {
-    ACTIVE
-    COMPLETED
-    INTERRUPTED
-}
-
-model User {
-    id        String   @id @default(cuid())
-    createdAt DateTime @default(now())
-
-    // Para evitar pisar cambios locales con GET /api/focus/state.
-    // Se actualiza en cada sync.
-    lastStateAt DateTime?
-
-    categories  Category[]
-    tasks       Task[]
-    blocks      FocusBlock[]
-    panicEvents PanicEvent[]
-    dailyLogs   DailyLog[]
-    phrases     MotivationPhrase[]
-    rituals     Ritual[]
-}
-
-model Category {
-    id        String   @id @default(cuid())
-    userId    String?
-    name      String
-    sortOrder Int      @default(0)
-    // Tiempo por defecto para nuevos bloques de esta categoría.
-    defaultSeconds Int  @default(1500)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
-
-    user        User?        @relation(fields: [userId], references: [id])
-    tasks       Task[]
-    blocks      FocusBlock[]
-    panicEvents PanicEvent[]
-
-    @@index([userId])
-}
-
-model Task {
-    id          String     @id @default(cuid())
-    userId      String?
-    categoryId  String
-    title       String
-    status      TaskStatus @default(PENDING)
-    // 1=Alta, 2=Media, 3=Baja, 4=Opcional
-    priority    Int        @default(2)
-    sortOrder   Int        @default(0)
-    selectedAt  DateTime?
-    completedAt DateTime?
-    createdAt   DateTime   @default(now())
-    updatedAt   DateTime   @updatedAt
-
-    user       User?                 @relation(fields: [userId], references: [id])
-    category   Category              @relation(fields: [categoryId], references: [id])
-    selections FocusBlockSelection[]
-
-    @@index([categoryId, status, sortOrder])
-    @@index([userId])
-}
-
-model FocusBlock {
-    id                   String      @id @default(cuid())
-    userId               String?
-    categoryId           String
-    status               BlockStatus @default(ACTIVE)
-    plannedSeconds       Int
-    actualSeconds        Int?
-    startedAt            DateTime    @default(now())
-    endedAt              DateTime?
-    // Si el bloque termina antes de tiempo, guardamos el motivo.
-    endReason            String?
-    allSelectedCompleted Boolean     @default(false)
-
-    user       User?                 @relation(fields: [userId], references: [id])
-    category   Category              @relation(fields: [categoryId], references: [id])
-    selections FocusBlockSelection[]
-
-    @@index([categoryId, startedAt])
-    @@index([userId])
-}
-
-model FocusBlockSelection {
-    id        String    @id @default(cuid())
-    blockId   String
-    taskId    String
-    sortOrder Int       @default(0)
-    doneAt    DateTime?
-
-    block FocusBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
-    task  Task       @relation(fields: [taskId], references: [id])
-
-    @@unique([blockId, taskId])
-    @@index([blockId, sortOrder])
+  ACTIVE
+  COMPLETED
+  // Nuevos estados (se agregan al enum existente en Postgres)
+  DRAFT
+  INTERRUPTED
+  CANCELLED
 }
 
 enum MotivationCategory {
-    DISCIPLINA
-    PROPOSITO_FINANCIERO
-    INDEPENDENCIA_EMOCIONAL
-    CRECIMIENTO_PROFESIONAL
+  DISCIPLINA
+  PROPOSITO_FINANCIERO
+  INDEPENDENCIA_EMOCIONAL
+  CRECIMIENTO_PROFESIONAL
 }
 
 enum RitualStepType {
-    BREATHING
-    VISUALIZATION
-    IF_THEN
-    CUSTOM
+  BREATHING
+  VISUALIZATION
+  IF_THEN
+  CUSTOM
+}
+
+model User {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  // Marca de agua para reconciliar state local vs server
+  lastStateAt DateTime @default(now())
+
+  categories  Category[]
+  tasks       Task[]
+  blocks      FocusBlock[]
+  panicEvents PanicEvent[]
+  dailyLogs   DailyLog[]
+  phrases     MotivationPhrase[]
+  rituals     Ritual[]
+}
+
+model Category {
+  id             String   @id @default(cuid())
+  userId         String?
+  name           String
+  sortOrder      Int      @default(0)
+  // default para el timer cuando eliges esta categoría
+  defaultSeconds Int      @default(1500)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user        User?        @relation(fields: [userId], references: [id])
+  tasks       Task[]
+  blocks      FocusBlock[]
+  panicEvents PanicEvent[]
+  dailyLogs   DailyLog[]
+
+  @@index([userId])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  userId      String?
+  categoryId  String
+  title       String
+  notes       String?
+  // 1=Alta, 4=Baja
+  priority    Int        @default(2)
+  status      TaskStatus @default(PENDING)
+  sortOrder   Int        @default(0)
+  selectedAt  DateTime?
+  completedAt DateTime?
+  dailyLogId  String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user       User?                 @relation(fields: [userId], references: [id])
+  category   Category              @relation(fields: [categoryId], references: [id])
+  selections FocusBlockSelection[]
+  dailyLog   DailyLog?             @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId, status, priority, sortOrder])
+  @@index([userId])
+  @@index([dailyLogId])
+}
+
+model FocusBlock {
+  id                   String      @id @default(cuid())
+  userId               String?
+  categoryId           String
+  // mantenemos default ACTIVE (evita problema de enum en migración)
+  status               BlockStatus @default(ACTIVE)
+  plannedSeconds       Int
+  actualSeconds        Int?
+  // DRAFT = null, ACTIVE/COMPLETED = timestamp
+  startedAt            DateTime?
+  endedAt              DateTime?
+  endReason            String?
+  allSelectedCompleted Boolean     @default(false)
+
+  user        User?                 @relation(fields: [userId], references: [id])
+  category    Category              @relation(fields: [categoryId], references: [id])
+  selections  FocusBlockSelection[]
+  panicEvents PanicEvent[]
+
+  @@index([categoryId, startedAt])
+  @@index([userId])
+}
+
+model FocusBlockSelection {
+  id        String    @id @default(cuid())
+  blockId   String
+  taskId    String
+  sortOrder Int       @default(0)
+  doneAt    DateTime?
+
+  block FocusBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  task  Task       @relation(fields: [taskId], references: [id])
+
+  @@unique([blockId, taskId])
+  @@index([blockId, sortOrder])
 }
 
 model PanicEvent {
-    id           String   @id @default(cuid())
-    userId       String
-    categoryId   String?
-    urge         Int?
-    emotion      String?
-    chosenAction String?
-    createdAt    DateTime @default(now())
+  id           String   @id @default(cuid())
+  userId       String
+  categoryId   String?
+  blockId      String?
+  urge         Int?
+  emotion      String?
+  chosenAction String?
+  createdAt    DateTime @default(now())
 
-    user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-    category Category? @relation(fields: [categoryId], references: [id])
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category?   @relation(fields: [categoryId], references: [id])
+  block    FocusBlock? @relation(fields: [blockId], references: [id], onDelete: SetNull)
 
-    @@index([userId, createdAt])
-    @@index([categoryId])
+  @@index([userId, createdAt])
+  @@index([categoryId])
+  @@index([blockId])
 }
 
 model DailyLog {
-    id              String   @id @default(cuid())
-    userId          String
-    dateKey         String // YYYY-MM-DD
-    urge            Int?
-    emotion         String?
-    energy          Int?
-    valueActionDone Boolean  @default(false)
-    nextStep        String?
-    createdAt       DateTime @default(now())
+  id                 String   @id @default(cuid())
+  userId             String
+  dateKey            String // YYYY-MM-DD (America/Bogota)
+  urge               Int?
+  emotion            String?
+  energy             Int?
+  mood               String?
+  minutesGoal        Int?
+  ifThen             String?
+  criticalTask       String?
+  criticalCategoryId String?
+  valueActionDone    Boolean  @default(false)
+  nextStep           String?
+  createdAt          DateTime @default(now())
 
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [criticalCategoryId], references: [id], onDelete: SetNull)
+  tasks    Task[]
 
-    @@unique([userId, dateKey])
-    @@index([userId, createdAt])
+  @@unique([userId, dateKey])
+  @@index([userId, createdAt])
+  @@index([criticalCategoryId])
 }
 
 model MotivationPhrase {
-    id        String             @id @default(cuid())
-    userId    String
-    category  MotivationCategory
-    text      String
-    ifThen    String?
-    active    Boolean            @default(true)
-    createdAt DateTime           @default(now())
+  id        String             @id @default(cuid())
+  userId    String
+  category  MotivationCategory
+  text      String
+  ifThen    String?
+  active    Boolean            @default(true)
+  createdAt DateTime           @default(now())
 
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-    @@index([userId, category, active])
+  @@index([userId, category, active])
 }
 
 model Ritual {
-    id        String   @id @default(cuid())
-    userId    String
-    name      String
-    isActive  Boolean  @default(true)
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-    steps RitualStep[]
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps RitualStep[]
 
-    @@index([userId, isActive])
+  @@index([userId, isActive])
 }
 
 model RitualStep {
-    id          String         @id @default(cuid())
-    ritualId    String
-    type        RitualStepType
-    title       String
-    description String?
-    seconds     Int?
-    sortOrder   Int            @default(0)
+  id          String         @id @default(cuid())
+  ritualId    String
+  type        RitualStepType
+  title       String
+  description String?
+  seconds     Int?
+  sortOrder   Int            @default(0)
 
-    ritual Ritual @relation(fields: [ritualId], references: [id], onDelete: Cascade)
+  ritual Ritual @relation(fields: [ritualId], references: [id], onDelete: Cascade)
 
-    @@index([ritualId, sortOrder])
+  @@index([ritualId, sortOrder])
 }

@@ -1,58 +1,64 @@
-export type TaskStatus = "PENDING" | "DONE" | "ARCHIVED";
-export type BlockStatus = "ACTIVE" | "COMPLETED" | "INTERRUPTED";
+export type TaskStatus = 'PENDING' | 'DONE' | 'ARCHIVED';
+export type BlockStatus =
+    | 'DRAFT'
+    | 'ACTIVE'
+    | 'COMPLETED'
+    | 'INTERRUPTED'
+    | 'CANCELLED';
 
 export type Category = {
-  id: string;
-  name: string;
-  sortOrder: number;
-  defaultSeconds?: number;
+    id: string;
+    name: string;
+    sortOrder: number;
+    defaultSeconds: number;
 };
 
 export type Task = {
-  id: string;
-  categoryId: string;
-  title: string;
-  status: TaskStatus;
-  priority: number; // 1=Alta ... 4=Baja
-  sortOrder: number;
-  selectedAt?: string | null;
-  completedAt?: string | null;
+    id: string;
+    categoryId: string;
+    title: string;
+    status: TaskStatus;
+    sortOrder: number;
+    priority: 1 | 2 | 3 | 4;
+    notes?: string | null;
+    selectedAt?: string | null;
+    completedAt?: string | null;
 };
 
 export type FocusBlock = {
-  id: string;
-  categoryId: string;
-  status: BlockStatus;
-  plannedSeconds: number;
-  actualSeconds?: number | null;
-  startedAt: string;
-  endedAt?: string | null;
-  endReason?: string | null;
-  allSelectedCompleted: boolean;
+    id: string;
+    categoryId: string;
+    status: BlockStatus;
+    plannedSeconds: number;
+    actualSeconds?: number | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    endReason?: string | null;
+    allSelectedCompleted: boolean;
 };
 
 export type FocusBlockSelection = {
-  id: string;
-  blockId: string;
-  taskId: string;
-  sortOrder: number;
-  doneAt?: string | null;
+    id: string;
+    blockId: string;
+    taskId: string;
+    sortOrder: number;
+    doneAt?: string | null;
 };
 
 export type FocusState = {
-  version: 1;
-  lastLocalEditAt: string;
-  categories: Category[];
-  tasks: Task[];
-  blocks: FocusBlock[];
-  selections: FocusBlockSelection[];
+    version: 1;
+    lastLocalEditAt: string;
+    categories: Category[];
+    tasks: Task[];
+    blocks: FocusBlock[];
+    selections: FocusBlockSelection[];
 };
 
 export type SyncPayload = {
-  state: FocusState;
+    state: FocusState;
 };
 
 export type SyncResponse = {
-  ok: true;
-  serverSavedAt: string;
+    ok: true;
+    serverSavedAt: string;
 };

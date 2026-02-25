@@ -2,7 +2,7 @@
 CREATE TYPE "TaskStatus" AS ENUM ('PENDING', 'DONE', 'ARCHIVED');
 
 -- CreateEnum
-CREATE TYPE "BlockStatus" AS ENUM ('ACTIVE', 'COMPLETED');
+CREATE TYPE "BlockStatus" AS ENUM ('ACTIVE', 'COMPLETED', 'DRAFT', 'INTERRUPTED', 'CANCELLED');
 
 -- CreateEnum
 CREATE TYPE "MotivationCategory" AS ENUM ('DISCIPLINA', 'PROPOSITO_FINANCIERO', 'INDEPENDENCIA_EMOCIONAL', 'CRECIMIENTO_PROFESIONAL');
@@ -14,6 +14,7 @@ CREATE TYPE "RitualStepType" AS ENUM ('BREATHING', 'VISUALIZATION', 'IF_THEN', '
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastStateAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
@@ -24,6 +25,7 @@ CREATE TABLE "Category" (
     "userId" TEXT,
     "name" TEXT NOT NULL,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "defaultSeconds" INTEGER NOT NULL DEFAULT 1500,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -36,10 +38,13 @@ CREATE TABLE "Task" (
     "userId" TEXT,
     "categoryId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
+    "notes" TEXT,
+    "priority" INTEGER NOT NULL DEFAULT 2,
     "status" "TaskStatus" NOT NULL DEFAULT 'PENDING',
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "selectedAt" TIMESTAMP(3),
     "completedAt" TIMESTAMP(3),
+    "dailyLogId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -54,8 +59,9 @@ CREATE TABLE "FocusBlock" (
     "status" "BlockStatus" NOT NULL DEFAULT 'ACTIVE',
     "plannedSeconds" INTEGER NOT NULL,
     "actualSeconds" INTEGER,
-    "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "startedAt" TIMESTAMP(3),
     "endedAt" TIMESTAMP(3),
+    "endReason" TEXT,
     "allSelectedCompleted" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "FocusBlock_pkey" PRIMARY KEY ("id")
@@ -77,6 +83,7 @@ CREATE TABLE "PanicEvent" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "categoryId" TEXT,
+    "blockId" TEXT,
     "urge" INTEGER,
     "emotion" TEXT,
     "chosenAction" TEXT,
@@ -93,6 +100,11 @@ CREATE TABLE "DailyLog" (
     "urge" INTEGER,
     "emotion" TEXT,
     "energy" INTEGER,
+    "mood" TEXT,
+    "minutesGoal" INTEGER,
+    "ifThen" TEXT,
+    "criticalTask" TEXT,
+    "criticalCategoryId" TEXT,
     "valueActionDone" BOOLEAN NOT NULL DEFAULT false,
     "nextStep" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -142,10 +154,13 @@ CREATE TABLE "RitualStep" (
 CREATE INDEX "Category_userId_idx" ON "Category"("userId");
 
 -- CreateIndex
-CREATE INDEX "Task_categoryId_status_sortOrder_idx" ON "Task"("categoryId", "status", "sortOrder");
+CREATE INDEX "Task_categoryId_status_priority_sortOrder_idx" ON "Task"("categoryId", "status", "priority", "sortOrder");
 
 -- CreateIndex
 CREATE INDEX "Task_userId_idx" ON "Task"("userId");
+
+-- CreateIndex
+CREATE INDEX "Task_dailyLogId_idx" ON "Task"("dailyLogId");
 
 -- CreateIndex
 CREATE INDEX "FocusBlock_categoryId_startedAt_idx" ON "FocusBlock"("categoryId", "startedAt");
@@ -166,7 +181,13 @@ CREATE INDEX "PanicEvent_userId_createdAt_idx" ON "PanicEvent"("userId", "create
 CREATE INDEX "PanicEvent_categoryId_idx" ON "PanicEvent"("categoryId");
 
 -- CreateIndex
+CREATE INDEX "PanicEvent_blockId_idx" ON "PanicEvent"("blockId");
+
+-- CreateIndex
 CREATE INDEX "DailyLog_userId_createdAt_idx" ON "DailyLog"("userId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "DailyLog_criticalCategoryId_idx" ON "DailyLog"("criticalCategoryId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "DailyLog_userId_dateKey_key" ON "DailyLog"("userId", "dateKey");
@@ -190,6 +211,9 @@ ALTER TABLE "Task" ADD CONSTRAINT "Task_userId_fkey" FOREIGN KEY ("userId") REFE
 ALTER TABLE "Task" ADD CONSTRAINT "Task_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Task" ADD CONSTRAINT "Task_dailyLogId_fkey" FOREIGN KEY ("dailyLogId") REFERENCES "DailyLog"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "FocusBlock" ADD CONSTRAINT "FocusBlock_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -208,7 +232,13 @@ ALTER TABLE "PanicEvent" ADD CONSTRAINT "PanicEvent_userId_fkey" FOREIGN KEY ("u
 ALTER TABLE "PanicEvent" ADD CONSTRAINT "PanicEvent_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "PanicEvent" ADD CONSTRAINT "PanicEvent_blockId_fkey" FOREIGN KEY ("blockId") REFERENCES "FocusBlock"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "DailyLog" ADD CONSTRAINT "DailyLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "DailyLog" ADD CONSTRAINT "DailyLog_criticalCategoryId_fkey" FOREIGN KEY ("criticalCategoryId") REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MotivationPhrase" ADD CONSTRAINT "MotivationPhrase_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

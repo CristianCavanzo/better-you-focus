@@ -1,76 +1,92 @@
 "use client";
 
-import { FocusState } from "@/src/types/focus";
-import { getSelectedTasks } from "@/src/lib/focusLogic";
+import { FocusState, Category } from "@/src/types/focus";
+import { getSelectedTasks, isTaskSelectedInBlock } from "@/src/lib/focusLogic";
+
+function priorityLabel(p: number) {
+  if (p === 1) return "Alta";
+  if (p === 2) return "Media";
+  if (p === 3) return "Baja";
+  return "Opcional";
+}
 
 export function FocusTasksPanel({
   state,
-  activeBlockId,
-  categoryId,
+  currentCategoryId,
+  currentBlockId,
+  currentBlockStatus,
   nextPendingTaskId,
-  onToggleTask,
+  categories,
+  onToggleTaskDone,
+  onToggleTaskInBlock,
   onSetPriority,
-  draftSelectedTaskIds,
-  onToggleDraftSelect,
-  onAddTaskToActiveBlock
+  onMoveTask
 }: {
   state: FocusState;
-  activeBlockId: string | null;
-  categoryId: string;
+  currentCategoryId: string;
+  currentBlockId: string | null;
+  currentBlockStatus: string;
   nextPendingTaskId: string | null;
-  onToggleTask: (taskId: string) => void;
-  onSetPriority: (taskId: string, priority: number) => void;
-  draftSelectedTaskIds: string[];
-  onToggleDraftSelect: (taskId: string) => void;
-  onAddTaskToActiveBlock: (taskId: string) => void;
+  categories: Category[];
+  onToggleTaskDone: (taskId: string) => void;
+  onToggleTaskInBlock: (taskId: string, checked: boolean) => void;
+  onSetPriority: (taskId: string, priority: 1 | 2 | 3 | 4) => void;
+  onMoveTask: (taskId: string, categoryId: string) => void;
 }) {
-  const allTasks = state.tasks
-    .filter((t) => t.categoryId === categoryId && t.status !== "ARCHIVED")
-    .sort((a, b) => ((a.priority ?? 2) - (b.priority ?? 2)) || (a.sortOrder - b.sortOrder));
+  const inCategory = state.tasks
+    .filter((t) => t.categoryId === currentCategoryId && t.status !== "ARCHIVED")
+    .slice()
+    .sort((a, b) => {
+      // pending first
+      if (a.status !== b.status) return a.status === "PENDING" ? -1 : 1;
+      // then priority
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.sortOrder - b.sortOrder;
+    });
 
-  const selected = activeBlockId ? getSelectedTasks(state, activeBlockId) : [];
+  const selected = currentBlockId ? getSelectedTasks(state, currentBlockId) : [];
 
-  const selectedIds = new Set(selected.map((x) => x.task.id));
-  const addable = activeBlockId
-    ? allTasks.filter((t) => t.status === "PENDING" && !selectedIds.has(t.id))
-    : [];
-
-  const priorityLabel = (p: number | undefined) =>
-    p === 1 ? "Alta" : p === 2 ? "Media" : p === 3 ? "Baja" : "Opcional";
+  const title = currentBlockStatus === "ACTIVE" ? "Bloque activo" : "Prepara tu bloque";
 
   return (
     <div className="h-full">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Tareas</h2>
+          <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-white/60">
-            {activeBlockId
-              ? "Estas son las tareas seleccionadas para este bloque."
-              : "Selecciona (checkbox) lo que quieres en el próximo bloque, o deja vacío para auto-pick."}
+            {currentBlockStatus === "ACTIVE"
+              ? "Puedes agregar o quitar tasks del bloque sin salir del Focus."
+              : "Selecciona 1–5 tasks para el bloque. Si no eliges, la app auto-selecciona."}
           </p>
         </div>
-        {activeBlockId && (
+        {currentBlockStatus === "ACTIVE" && (
           <div className="text-xs text-white/55">
             Auto-avance: <span className="text-white/80">siguiente pendiente</span>
           </div>
         )}
       </div>
 
-      {activeBlockId ? (
-        <div className="mt-4 grid gap-2">
-          {selected.length === 0 ? (
+      {/* Selected */}
+      <div className="mt-4">
+        <div className="text-sm font-semibold">Tasks en el bloque</div>
+        <div className="mt-2 grid gap-2">
+          {!currentBlockId ? (
             <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
-              No hay tareas pendientes en esta categoría. Añade tareas y reinicia.
+              No hay bloque editable. (Esto no debería pasar; refresca.)
+            </div>
+          ) : selected.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
+              Aún no seleccionas tasks.
             </div>
           ) : (
             selected.map(({ selection, task }) => {
               const done = task.status === "DONE";
               const isNext = !done && nextPendingTaskId === task.id;
               return (
-                <label
+                <div
                   key={selection.id}
                   className={[
-                    "flex items-center gap-3 rounded-xl border px-3 py-3 cursor-pointer select-none",
+                    "flex items-center gap-3 rounded-xl border px-3 py-3",
                     done ? "border-white/10 bg-white/5 opacity-80" : "border-white/10 bg-black/20 hover:bg-black/25",
                     isNext ? "ring-2 ring-emerald-400/30" : ""
                   ].join(" ")}
@@ -78,106 +94,111 @@ export function FocusTasksPanel({
                   <input
                     type="checkbox"
                     checked={done}
-                    onChange={() => onToggleTask(task.id)}
+                    onChange={() => onToggleTaskDone(task.id)}
                     className="h-4 w-4"
                   />
                   <div className="flex-1">
                     <div className="text-sm font-medium">{task.title}</div>
                     <div className="mt-0.5 text-xs text-white/55">
-                      {done ? "✅ completada" : isNext ? "➡️ siguiente" : "pendiente"}
+                      {done ? "✅ completada" : isNext ? "➡️ siguiente" : "pendiente"} · {priorityLabel(task.priority)}
                     </div>
                   </div>
-
-                  <select
-                    className="rounded-xl bg-black/20 border border-white/10 px-2 py-1 text-xs"
-                    value={task.priority ?? 2}
-                    onChange={(e) => onSetPriority(task.id, Number(e.target.value))}
-                    title="Prioridad"
+                  <button
+                    className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-xs hover:bg-white/10"
+                    type="button"
+                    onClick={() => onToggleTaskInBlock(task.id, false)}
+                    title="Quitar del bloque"
                   >
-                    {[1, 2, 3, 4].map((p) => (
-                      <option key={p} value={p}>
-                        {priorityLabel(p)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            })
-          )}
-
-          {addable.length > 0 && (
-            <div className="mt-4 rounded-2xl border border-white/10 bg-black/15 p-3">
-              <div className="text-xs text-white/60">Añadir al bloque (rápido)</div>
-              <div className="mt-2 grid gap-2">
-                {addable.slice(0, 6).map((t) => (
-                  <div
-                    key={t.id}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2"
-                  >
-                    <div className="text-sm truncate">{t.title}</div>
-                    <button
-                      className="rounded-xl bg-white/5 border border-white/10 px-3 py-1 text-xs hover:bg-white/10"
-                      onClick={() => onAddTaskToActiveBlock(t.id)}
-                      type="button"
-                    >
-                      + Añadir
-                    </button>
-                  </div>
-                ))}
-              </div>
-              {addable.length > 6 && (
-                <div className="mt-2 text-[11px] text-white/45">…y {addable.length - 6} más</div>
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="mt-4 grid gap-2">
-          {allTasks.length === 0 ? (
-            <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
-              No hay tareas en esta categoría. Agrega una a la izquierda.
-            </div>
-          ) : (
-            allTasks.map((t) => {
-              const checked = draftSelectedTaskIds.includes(t.id);
-              return (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-3"
-                >
-                  <label className="flex items-center gap-3 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => onToggleDraftSelect(t.id)}
-                      className="h-4 w-4"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm truncate">{t.title}</div>
-                      <div className="text-xs text-white/55">
-                        {t.status === "DONE" ? "DONE" : "PENDING"} · {priorityLabel(t.priority)}
-                      </div>
-                    </div>
-                  </label>
-
-                  <select
-                    className="shrink-0 rounded-xl bg-black/20 border border-white/10 px-2 py-1 text-xs"
-                    value={t.priority ?? 2}
-                    onChange={(e) => onSetPriority(t.id, Number(e.target.value))}
-                    title="Prioridad"
-                  >
-                    {[1, 2, 3, 4].map((p) => (
-                      <option key={p} value={p}>
-                        {priorityLabel(p)}
-                      </option>
-                    ))}
-                  </select>
+                    Quitar
+                  </button>
                 </div>
               );
             })
           )}
         </div>
-      )}
+      </div>
+
+      {/* Backlog */}
+      <div className="mt-6">
+        <div className="text-sm font-semibold">Backlog ({categories.find((c) => c.id === currentCategoryId)?.name ?? ""})</div>
+        <div className="mt-2 grid gap-2">
+          {inCategory.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
+              No hay tasks en este grupo.
+            </div>
+          ) : (
+            inCategory.map((t) => {
+              const inBlock = currentBlockId ? isTaskSelectedInBlock(state, currentBlockId, t.id) : false;
+              const done = t.status === "DONE";
+
+              return (
+                <div
+                  key={t.id}
+                  className={
+                    "grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-xl border border-white/10 " +
+                    (done ? "bg-white/5 opacity-80" : "bg-black/20 hover:bg-black/25")
+                  }
+                >
+                  <label className="flex items-center gap-2 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={inBlock}
+                      onChange={(e) => onToggleTaskInBlock(t.id, e.target.checked)}
+                      className="h-4 w-4"
+                      disabled={!currentBlockId}
+                      title={!currentBlockId ? "No hay bloque editable" : "Agregar/Quitar del bloque"}
+                    />
+                    <span className="text-[11px] text-white/55">Bloque</span>
+                  </label>
+
+                  <div className="py-3 pr-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onToggleTaskDone(t.id)}
+                        className="text-left"
+                        title="Marcar DONE/PENDING"
+                      >
+                        <div className="text-sm font-medium">{t.title}</div>
+                        <div className="mt-0.5 text-xs text-white/55">
+                          {done ? "DONE" : "PENDING"} · {priorityLabel(t.priority)}
+                        </div>
+                      </button>
+
+                      <select
+                        value={t.priority}
+                        onChange={(e) => onSetPriority(t.id, Number(e.target.value) as any)}
+                        className="rounded-xl bg-black/20 border border-white/10 px-2 py-1 text-xs"
+                        title="Prioridad"
+                      >
+                        <option value={1}>Alta</option>
+                        <option value={2}>Media</option>
+                        <option value={3}>Baja</option>
+                        <option value={4}>Opcional</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="px-3 py-3">
+                    <select
+                      value={t.categoryId}
+                      onChange={(e) => onMoveTask(t.id, e.target.value)}
+                      className="rounded-xl bg-black/20 border border-white/10 px-2 py-1 text-xs"
+                      title="Mover a otro grupo"
+                    >
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { FocusState } from "@/src/types/focus";
-import { getSelectedTasks } from "@/src/lib/focusLogic";
+import { getSelectedTasks, getCategoryById } from "@/src/lib/focusLogic";
 
 export function FocusEndSummary({
   state,
@@ -14,28 +14,35 @@ export function FocusEndSummary({
 }) {
   const block = state.blocks.find((b) => b.id === blockId);
   const selected = getSelectedTasks(state, blockId);
-  const catName = state.categories.find((c) => c.id === block?.categoryId)?.name;
 
   if (!block) return null;
+
+  const category = getCategoryById(state, block.categoryId);
 
   const total = selected.length;
   const done = selected.filter((x) => x.task.status === "DONE").length;
   const pending = total - done;
+
+  const statusLabel =
+    block.status === "COMPLETED"
+      ? "✅ Completado"
+      : block.status === "INTERRUPTED"
+        ? "⛔ Interrumpido"
+        : block.status;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#0b0c10] p-5">
         <h3 className="text-lg font-semibold">Resumen del bloque</h3>
         <p className="mt-1 text-sm text-white/60">
-          Categoría: <span className="text-white/85">{catName ?? block.categoryId}</span>
+          Grupo: <span className="text-white/85">{category?.name ?? block.categoryId}</span> ·{" "}
+          <span className="text-white/75">{statusLabel}</span>
         </p>
 
-        {block.status === "INTERRUPTED" && (
-          <div className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3">
-            <div className="text-sm font-medium">⛔ Bloque interrumpido</div>
-            <div className="mt-1 text-sm text-white/70">
-              Motivo: <span className="text-white/85">{block.endReason ?? "(sin motivo)"}</span>
-            </div>
+        {block.status === "INTERRUPTED" && block.endReason && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+            <div className="text-xs text-white/55">Motivo</div>
+            <div className="mt-1 text-sm">{block.endReason}</div>
           </div>
         )}
 
@@ -61,7 +68,7 @@ export function FocusEndSummary({
           <p className="mt-1 text-sm text-white/60">
             {block.allSelectedCompleted
               ? "Bien. Esto refuerza continuidad (cierre claro)."
-              : "Lo pendiente se mantiene y entra al próximo bloque de la misma categoría."}
+              : "Lo pendiente se mantiene para el siguiente bloque de este grupo."}
           </p>
         </div>
 
@@ -69,6 +76,7 @@ export function FocusEndSummary({
           <button
             className="rounded-xl bg-white/10 border border-white/10 px-4 py-2 text-sm hover:bg-white/15"
             onClick={onClose}
+            type="button"
           >
             Cerrar
           </button>

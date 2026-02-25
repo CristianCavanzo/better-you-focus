@@ -13,7 +13,7 @@ const MICRO_TASKS = [
   "Ordenar escritorio 2 min"
 ];
 
-export function PanicButton({ categoryId }: { categoryId: string }) {
+export function PanicButton({ categoryId, blockId }: { categoryId: string; blockId?: string | null }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string>(MICRO_TASKS[0]);
 
@@ -24,7 +24,7 @@ export function PanicButton({ categoryId }: { categoryId: string }) {
       await fetch("/api/panic", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ categoryId, chosenAction: suggestion })
+        body: JSON.stringify({ categoryId, blockId, chosenAction: suggestion })
       });
     } catch {}
   };
@@ -34,6 +34,7 @@ export function PanicButton({ categoryId }: { categoryId: string }) {
       <button
         onClick={() => setOpen(true)}
         className="rounded-2xl border border-white/10 bg-red-500/15 px-4 py-2 text-sm hover:bg-red-500/20 flex items-center gap-2"
+        type="button"
       >
         <AlertTriangle size={16} className="text-red-300" />
         Botón de pánico
@@ -60,7 +61,11 @@ export function PanicButton({ categoryId }: { categoryId: string }) {
                     Un impulso no es una orden. Vas a surfearlo y redirigir energía.
                   </div>
                 </div>
-                <button onClick={() => setOpen(false)} className="rounded-xl border border-white/10 bg-white/5 p-2">
+                <button
+                  onClick={() => setOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-2"
+                  type="button"
+                >
                   <X size={16} />
                 </button>
               </div>
@@ -96,12 +101,14 @@ export function PanicButton({ categoryId }: { categoryId: string }) {
                     setOpen(false);
                   }}
                   className="rounded-2xl border border-white/10 bg-accent/15 px-4 py-2 text-sm hover:bg-accent/20"
+                  type="button"
                 >
                   Registrar y volver
                 </button>
                 <button
                   onClick={() => setOpen(false)}
                   className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm hover:bg-white/10"
+                  type="button"
                 >
                   Cerrar
                 </button>
