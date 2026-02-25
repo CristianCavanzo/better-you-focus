@@ -27,12 +27,30 @@ export async function POST(req: Request) {
   const { categories, tasks, blocks, selections } = body.state;
 
   await prisma.$transaction(async (tx) => {
+    // timestamp real del estado (viene del cliente)
+    const lastStateAt = new Date(body.state.lastLocalEditAt);
+    await tx.user.update({
+      where: { id: effectiveUserId },
+      data: { lastStateAt: isNaN(lastStateAt.getTime()) ? new Date() : lastStateAt }
+    });
+
     // categories
     for (const c of categories) {
       await tx.category.upsert({
         where: { id: c.id },
-        update: { name: c.name, sortOrder: c.sortOrder, userId: effectiveUserId },
-        create: { id: c.id, name: c.name, sortOrder: c.sortOrder, userId: effectiveUserId }
+        update: {
+          name: c.name,
+          sortOrder: c.sortOrder,
+          userId: effectiveUserId,
+          defaultSeconds: c.defaultSeconds ?? 25 * 60
+        },
+        create: {
+          id: c.id,
+          name: c.name,
+          sortOrder: c.sortOrder,
+          userId: effectiveUserId,
+          defaultSeconds: c.defaultSeconds ?? 25 * 60
+        }
       });
     }
 
@@ -45,6 +63,7 @@ export async function POST(req: Request) {
           categoryId: t.categoryId,
           title: t.title,
           status: t.status,
+          priority: t.priority ?? 2,
           sortOrder: t.sortOrder,
           selectedAt: t.selectedAt ? new Date(t.selectedAt) : null,
           completedAt: t.completedAt ? new Date(t.completedAt) : null
@@ -55,6 +74,7 @@ export async function POST(req: Request) {
           categoryId: t.categoryId,
           title: t.title,
           status: t.status,
+          priority: t.priority ?? 2,
           sortOrder: t.sortOrder,
           selectedAt: t.selectedAt ? new Date(t.selectedAt) : null,
           completedAt: t.completedAt ? new Date(t.completedAt) : null
@@ -74,6 +94,7 @@ export async function POST(req: Request) {
           actualSeconds: b.actualSeconds ?? null,
           startedAt: new Date(b.startedAt),
           endedAt: b.endedAt ? new Date(b.endedAt) : null,
+          endReason: b.endReason ?? null,
           allSelectedCompleted: b.allSelectedCompleted
         },
         create: {
@@ -85,6 +106,7 @@ export async function POST(req: Request) {
           actualSeconds: b.actualSeconds ?? null,
           startedAt: new Date(b.startedAt),
           endedAt: b.endedAt ? new Date(b.endedAt) : null,
+          endReason: b.endReason ?? null,
           allSelectedCompleted: b.allSelectedCompleted
         }
       });

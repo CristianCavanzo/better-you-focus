@@ -4,9 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addCategory,
   addTask,
+  addTaskToBlock,
+  addTaskWithId,
   endBlock,
   getActiveBlock,
   getNextPendingSelection,
+  setCategoryDefaultSeconds,
+  setTaskPriority,
   startBlock,
   toggleTaskDone
 } from "@/src/lib/focusLogic";
@@ -22,15 +26,21 @@ import { cn } from "@/src/lib/ui";
 
 const DEFAULT_POMODORO_SECONDS = 25 * 60;
 
+const PRESET_MINUTES = [15, 25, 45, 60, 90];
+
 export default function FocusPage() {
   const { state, setState, hydrateFromServer } = useFocusLocalState();
 
   const [categoryId, setCategoryId] = useState<string>("work");
+  const [plannedSeconds, setPlannedSeconds] = useState<number>(DEFAULT_POMODORO_SECONDS);
   const [secondsLeft, setSecondsLeft] = useState<number>(DEFAULT_POMODORO_SECONDS);
   const [running, setRunning] = useState(false);
   const [showSummaryForBlockId, setShowSummaryForBlockId] = useState<string | null>(null);
   const [showFireworks, setShowFireworks] = useState(false);
   const [entered, setEntered] = useState(false);
+
+  // Selección manual para el próximo bloque (cuando aún no hay bloque activo).
+  const [draftSelectedTaskIds, setDraftSelectedTaskIds] = useState<string[]>([]);
 
   const activeBlock = useMemo(() => getActiveBlock(state), [state]);
   const nextPendingTaskId = useMemo(
@@ -42,6 +52,18 @@ export default function FocusPage() {
     hydrateFromServer().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-sync (bajo ruido): guarda cambios en DB sin depender del botón.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      fetch("/api/focus/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state })
+      }).catch(() => {});
+    }, 900);
+    return () => clearTimeout(t);
+  }, [state]);
 
   useEffect(() => {
     if (!running) return;
@@ -56,8 +78,8 @@ export default function FocusPage() {
 
     setRunning(false);
     if (activeBlock) {
-      const actual = DEFAULT_POMODORO_SECONDS;
-      const next = endBlock(state, activeBlock.id, actual);
+      const actual = activeBlock.plannedSeconds;
+      const next = endBlock(state, activeBlock.id, actual, { status: "COMPLETED" });
       setState(next);
       setShowSummaryForBlockId(activeBlock.id);
 
@@ -78,27 +100,78 @@ export default function FocusPage() {
 
   const categories = state.categories.slice().sort((a, b) => a.sortOrder - b.sortOrder);
 
+  // Cuando cambia la categoría (y no hay bloque activo), ajusta el tiempo por defecto.
+  useEffect(() => {
+    if (activeBlock) return;
+    const cat = categories.find((c) => c.id === categoryId);
+    const nextPlanned = cat?.defaultSeconds ?? DEFAULT_POMODORO_SECONDS;
+    setPlannedSeconds(nextPlanned);
+    setSecondsLeft(nextPlanned);
+    setDraftSelectedTaskIds([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryId]);
+
   const onStart = () => {
     if (!entered) return;
     if (activeBlock) {
       setRunning(true);
       return;
     }
-    const next = startBlock(state, categoryId, DEFAULT_POMODORO_SECONDS, 5);
+    // persiste el "defaultSeconds" de la categoría
+    const withDefault = setCategoryDefaultSeconds(state, categoryId, plannedSeconds);
+    const next = startBlock(withDefault, categoryId, plannedSeconds, 5, draftSelectedTaskIds);
     setState(next);
-    setSecondsLeft(DEFAULT_POMODORO_SECONDS);
+    setSecondsLeft(plannedSeconds);
     setRunning(true);
+    setDraftSelectedTaskIds([]);
   };
 
   const onStop = () => setRunning(false);
 
   const onReset = () => {
     setRunning(false);
-    setSecondsLeft(DEFAULT_POMODORO_SECONDS);
+    setSecondsLeft(plannedSeconds);
   };
 
   const onToggleTask = (taskId: string) => setState(toggleTaskDone(state, taskId));
-  const onAddTask = (title: string) => setState(addTask(state, categoryId, title));
+
+  const onAddTask = (title: string) => {
+    // Si hay bloque activo, el "quick add" se asigna automáticamente al bloque.
+    if (activeBlock) {
+      const created = addTaskWithId(state, categoryId, title);
+      const linked = addTaskToBlock(created.state, activeBlock.id, created.taskId);
+      setState(linked);
+      return;
+    }
+
+    const next = addTask(state, categoryId, title);
+    setState(next);
+  };
+
+  const onSetPriority = (taskId: string, priority: number) =>
+    setState(setTaskPriority(state, taskId, priority));
+
+  const onToggleDraftSelect = (taskId: string) => {
+    setDraftSelectedTaskIds((prev) =>
+      prev.includes(taskId) ? prev.filter((x) => x !== taskId) : [...prev, taskId]
+    );
+  };
+
+  const onInterrupt = () => {
+    if (!activeBlock) return;
+    setRunning(false);
+    const elapsed = Math.max(0, activeBlock.plannedSeconds - secondsLeft);
+    const reason =
+      prompt(
+        "¿Por qué interrumpiste el bloque?\nEj: urgencia, distracción, reunión, cansancio...",
+      ) ?? "";
+    const next = endBlock(state, activeBlock.id, elapsed, {
+      status: "INTERRUPTED",
+      endReason: reason.trim() || "Interrumpido"
+    });
+    setState(next);
+    setShowSummaryForBlockId(activeBlock.id);
+  };
 
   const onAddCategory = (name: string) => {
     const next = addCategory(state, name);
@@ -140,6 +213,54 @@ export default function FocusPage() {
                       </option>
                     ))}
                   </select>
+
+                  <select
+                    className="rounded-2xl bg-black/20 border border-white/10 px-3 py-2 text-sm"
+                    value={Math.round(plannedSeconds / 60)}
+                    onChange={(e) => {
+                      const mins = Number(e.target.value);
+                      const next = Math.max(1, mins) * 60;
+                      setPlannedSeconds(next);
+                      if (!activeBlock && !running) setSecondsLeft(next);
+                      // persistimos el defaultSeconds en la categoría
+                      if (!activeBlock) setState(setCategoryDefaultSeconds(state, categoryId, next));
+                    }}
+                    disabled={!!activeBlock}
+                    title="Tiempo del bloque"
+                  >
+                    {(() => {
+                      const m = Math.round(plannedSeconds / 60);
+                      return PRESET_MINUTES.includes(m) ? null : (
+                        <option key="__custom" value={m}>
+                          {m}m
+                        </option>
+                      );
+                    })()}
+                    {PRESET_MINUTES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}m
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    className="rounded-2xl bg-white/5 border border-white/10 px-3 py-2 text-sm hover:bg-white/10"
+                    onClick={() => {
+                      if (activeBlock) return;
+                      const raw = prompt("Minutos para este bloque:", String(Math.round(plannedSeconds / 60)));
+                      const mins = Number(raw);
+                      if (!Number.isFinite(mins) || mins <= 0) return;
+                      const next = Math.round(mins) * 60;
+                      setPlannedSeconds(next);
+                      setSecondsLeft(next);
+                      setState(setCategoryDefaultSeconds(state, categoryId, next));
+                    }}
+                    disabled={!!activeBlock}
+                    type="button"
+                    title="Tiempo personalizado"
+                  >
+                    Custom
+                  </button>
 
                   <button
                     className="rounded-2xl bg-white/5 border border-white/10 px-3 py-2 text-sm hover:bg-white/10"
@@ -183,6 +304,17 @@ export default function FocusPage() {
                       Reset
                     </button>
 
+                    {activeBlock && (
+                      <button
+                        className="rounded-2xl bg-rose-500/10 border border-rose-500/20 px-4 py-2 text-sm hover:bg-rose-500/15"
+                        onClick={onInterrupt}
+                        disabled={running}
+                        title={running ? "Pausa antes de interrumpir" : "Termina el bloque antes de tiempo"}
+                      >
+                        Interrumpir
+                      </button>
+                    )}
+
                     <button
                       className="rounded-2xl bg-white/5 border border-white/10 px-4 py-2 text-sm hover:bg-white/10"
                       onClick={() => setEntered(false)}
@@ -222,7 +354,6 @@ export default function FocusPage() {
                           (e.target as HTMLInputElement).value = "";
                         }
                       }}
-                      disabled={!!activeBlock}
                     />
                     <button
                       className="rounded-2xl bg-white/5 border border-white/10 px-3 py-2 text-sm hover:bg-white/10"
@@ -232,13 +363,14 @@ export default function FocusPage() {
                         if (v.trim()) onAddTask(v);
                         if (input) input.value = "";
                       }}
-                      disabled={!!activeBlock}
                     >
                       Add
                     </button>
                   </div>
                   <div className="mt-2 text-xs text-muted">
-                    Bloqueamos edición durante el bloque para reducir dispersión.
+                    {activeBlock
+                      ? "Quick add: se asigna automáticamente al bloque."
+                      : "Puedes seleccionar manualmente tareas para el próximo bloque en el panel de la derecha."}
                   </div>
                 </div>
               </div>
@@ -253,6 +385,13 @@ export default function FocusPage() {
             categoryId={categoryId}
             nextPendingTaskId={nextPendingTaskId}
             onToggleTask={onToggleTask}
+            onSetPriority={onSetPriority}
+            draftSelectedTaskIds={draftSelectedTaskIds}
+            onToggleDraftSelect={onToggleDraftSelect}
+            onAddTaskToActiveBlock={(taskId) => {
+              if (!activeBlock) return;
+              setState(addTaskToBlock(state, activeBlock.id, taskId));
+            }}
           />
         </div>
       </div>
@@ -265,7 +404,9 @@ export default function FocusPage() {
             setShowSummaryForBlockId(null);
             const block = state.blocks.find((b) => b.id === showSummaryForBlockId);
             if (block) setCategoryId(block.categoryId);
-            setSecondsLeft(DEFAULT_POMODORO_SECONDS);
+            const planned = block?.plannedSeconds ?? DEFAULT_POMODORO_SECONDS;
+            setPlannedSeconds(planned);
+            setSecondsLeft(planned);
           }}
         />
       )}

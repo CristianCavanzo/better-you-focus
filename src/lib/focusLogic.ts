@@ -2,9 +2,9 @@ import { FocusState, TaskStatus } from '@/src/types/focus';
 import { cuidLike, nowIso } from '@/src/lib/ids';
 
 export const DEFAULT_CATEGORIES = [
-    { id: 'work', name: 'Trabajo', sortOrder: 0 },
-    { id: 'study', name: 'Estudio', sortOrder: 1 },
-    { id: 'gym', name: 'Gym', sortOrder: 2 },
+    { id: 'work', name: 'Trabajo', sortOrder: 0, defaultSeconds: 25 * 60 },
+    { id: 'study', name: 'Estudio', sortOrder: 1, defaultSeconds: 25 * 60 },
+    { id: 'gym', name: 'Gym', sortOrder: 2, defaultSeconds: 25 * 60 },
 ];
 
 export function makeInitialState(): FocusState {
@@ -20,6 +20,7 @@ export function makeInitialState(): FocusState {
                 categoryId: 'work',
                 title: 'Abrir repo y elegir 1 tarea',
                 status: 'PENDING',
+                priority: 2,
                 sortOrder: 0,
             },
             {
@@ -27,6 +28,7 @@ export function makeInitialState(): FocusState {
                 categoryId: 'work',
                 title: 'Implementar 1 cambio pequeño',
                 status: 'PENDING',
+                priority: 2,
                 sortOrder: 1,
             },
             {
@@ -34,6 +36,7 @@ export function makeInitialState(): FocusState {
                 categoryId: 'study',
                 title: 'Leer 10 min (1 tema)',
                 status: 'PENDING',
+                priority: 2,
                 sortOrder: 0,
             },
             {
@@ -41,6 +44,7 @@ export function makeInitialState(): FocusState {
                 categoryId: 'gym',
                 title: 'Calentamiento 5 min',
                 status: 'PENDING',
+                priority: 2,
                 sortOrder: 0,
             },
         ],
@@ -60,8 +64,22 @@ export function addCategory(state: FocusState, name: string): FocusState {
         ...state,
         categories: [
             ...state.categories,
-            { id, name: name.trim() || 'Nueva categoría', sortOrder },
+            { id, name: name.trim() || 'Nueva categoría', sortOrder, defaultSeconds: 25 * 60 },
         ],
+    });
+}
+
+export function setCategoryDefaultSeconds(
+    state: FocusState,
+    categoryId: string,
+    seconds: number,
+): FocusState {
+    const safe = Number.isFinite(seconds) ? Math.max(60, Math.min(6 * 60 * 60, seconds)) : 25 * 60;
+    return touch({
+        ...state,
+        categories: state.categories.map((c) =>
+            c.id === categoryId ? { ...c, defaultSeconds: safe } : c,
+        ),
     });
 }
 
@@ -70,12 +88,20 @@ export function addTask(
     categoryId: string,
     title: string,
 ): FocusState {
+    return addTaskWithId(state, categoryId, title).state;
+}
+
+export function addTaskWithId(
+    state: FocusState,
+    categoryId: string,
+    title: string,
+): { state: FocusState; taskId: string } {
     const id = cuidLike();
     const existing = state.tasks.filter((t) => t.categoryId === categoryId);
     const sortOrder = existing.length
         ? Math.max(...existing.map((t) => t.sortOrder)) + 1
         : 0;
-    return touch({
+    const next = touch({
         ...state,
         tasks: [
             ...state.tasks,
@@ -84,10 +110,56 @@ export function addTask(
                 categoryId,
                 title: title.trim() || 'Nueva tarea',
                 status: 'PENDING',
+                priority: 2,
                 sortOrder,
             },
         ],
     });
+    return { state: next, taskId: id };
+}
+
+export function setTaskPriority(
+    state: FocusState,
+    taskId: string,
+    priority: number,
+): FocusState {
+    const p = Number.isFinite(priority) ? Math.max(1, Math.min(4, Math.round(priority))) : 2;
+    return touch({
+        ...state,
+        tasks: state.tasks.map((t) => (t.id === taskId ? { ...t, priority: p } : t)),
+    });
+}
+
+export function addTaskToBlock(state: FocusState, blockId: string, taskId: string): FocusState {
+    const block = state.blocks.find((b) => b.id === blockId);
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!block || !task) return state;
+    if (task.categoryId !== block.categoryId) return state;
+    if (state.selections.some((s) => s.blockId === blockId && s.taskId === taskId)) return state;
+
+    const blockSelections = state.selections
+        .filter((s) => s.blockId === blockId)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+    const nextOrder = blockSelections.length
+        ? Math.max(...blockSelections.map((s) => s.sortOrder)) + 1
+        : 0;
+
+    const now = nowIso();
+    const selections = [
+        ...state.selections,
+        {
+            id: cuidLike(),
+            blockId,
+            taskId,
+            sortOrder: nextOrder,
+            doneAt: null,
+        },
+    ];
+
+    // marca selectedAt para que quede evidencia de “entró al bloque”
+    const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, selectedAt: now } : t));
+
+    return touch({ ...state, tasks, selections });
 }
 
 export function toggleTaskDone(state: FocusState, taskId: string): FocusState {
@@ -118,15 +190,33 @@ export function startBlock(
     categoryId: string,
     plannedSeconds: number,
     pickCount = 5,
+    selectedTaskIds?: string[],
 ) {
     const now = nowIso();
     const blockId = cuidLike();
 
-    // tasks pendientes por orden (incluye las que quedaron del bloque anterior)
-    const pending = state.tasks
-        .filter((t) => t.categoryId === categoryId && t.status === 'PENDING')
-        .sort((a, b) => a.sortOrder - b.sortOrder)
+    const byId = new Map(state.tasks.map((t) => [t.id, t]));
+
+    // Si el usuario seleccionó manualmente tareas para el bloque, respetamos eso.
+    const manual = (selectedTaskIds ?? [])
+        .map((id) => byId.get(id))
+        .filter(
+            (t): t is NonNullable<typeof t> =>
+                !!t && t.categoryId === categoryId && t.status === 'PENDING',
+        )
         .slice(0, pickCount);
+
+    // Fallback: auto-pick por prioridad y luego orden.
+    const pending = manual.length
+        ? manual
+        : state.tasks
+              .filter((t) => t.categoryId === categoryId && t.status === 'PENDING')
+              .sort(
+                  (a, b) =>
+                      ((a.priority ?? 2) - (b.priority ?? 2)) ||
+                      (a.sortOrder - b.sortOrder),
+              )
+              .slice(0, pickCount);
 
     const block = {
         id: blockId,
@@ -136,6 +226,7 @@ export function startBlock(
         actualSeconds: null,
         startedAt: now,
         endedAt: null,
+        endReason: null,
         allSelectedCompleted: false,
     };
 
@@ -163,6 +254,7 @@ export function endBlock(
     state: FocusState,
     blockId: string,
     actualSeconds: number,
+    opts?: { status?: 'COMPLETED' | 'INTERRUPTED'; endReason?: string | null },
 ) {
     const now = nowIso();
     const block = state.blocks.find((b) => b.id === blockId);
@@ -175,13 +267,17 @@ export function endBlock(
     const allDone =
         blockSelections.length > 0 && blockSelections.every((s) => !!s.doneAt);
 
+    const nextStatus = (opts?.status ?? 'COMPLETED') as 'COMPLETED' | 'INTERRUPTED';
+    const endReason = (opts?.endReason ?? null) ? String(opts.endReason).slice(0, 140) : null;
+
     const blocks = state.blocks.map((b) =>
         b.id === blockId
             ? {
                   ...b,
-                  status: 'COMPLETED' as const,
+                  status: nextStatus,
                   actualSeconds,
                   endedAt: now,
+                  endReason,
                   allSelectedCompleted: allDone,
               }
             : b,

@@ -14,6 +14,7 @@ export function FocusEndSummary({
 }) {
   const block = state.blocks.find((b) => b.id === blockId);
   const selected = getSelectedTasks(state, blockId);
+  const catName = state.categories.find((c) => c.id === block?.categoryId)?.name;
 
   if (!block) return null;
 
@@ -26,8 +27,17 @@ export function FocusEndSummary({
       <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#0b0c10] p-5">
         <h3 className="text-lg font-semibold">Resumen del bloque</h3>
         <p className="mt-1 text-sm text-white/60">
-          Categoría: <span className="text-white/85">{block.categoryId}</span>
+          Categoría: <span className="text-white/85">{catName ?? block.categoryId}</span>
         </p>
+
+        {block.status === "INTERRUPTED" && (
+          <div className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3">
+            <div className="text-sm font-medium">⛔ Bloque interrumpido</div>
+            <div className="mt-1 text-sm text-white/70">
+              Motivo: <span className="text-white/85">{block.endReason ?? "(sin motivo)"}</span>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 grid grid-cols-3 gap-2">
           <div className="rounded-xl border border-white/10 bg-white/5 p-3">

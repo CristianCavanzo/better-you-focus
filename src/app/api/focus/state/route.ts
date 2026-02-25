@@ -16,7 +16,7 @@ export async function GET() {
     const effectiveUserId = userId ?? 'demo';
 
     // asegura user
-    await prisma.user.upsert({
+    const user = await prisma.user.upsert({
         where: { id: effectiveUserId },
         update: {},
         create: { id: effectiveUserId },
@@ -55,6 +55,7 @@ export async function GET() {
                         userId: effectiveUserId,
                         name: c.name,
                         sortOrder: c.sortOrder,
+                        defaultSeconds: c.defaultSeconds ?? 25 * 60,
                     },
                 });
             }
@@ -67,10 +68,16 @@ export async function GET() {
                         categoryId: t.categoryId,
                         title: t.title,
                         status: t.status,
+                        priority: t.priority ?? 2,
                         sortOrder: t.sortOrder,
                     },
                 });
             }
+
+            await tx.user.update({
+                where: { id: effectiveUserId },
+                data: { lastStateAt: new Date(initial.lastLocalEditAt) },
+            });
         });
 
         return NextResponse.json({ ok: true, state: initial });
@@ -80,17 +87,21 @@ export async function GET() {
         ok: true,
         state: {
             version: 1,
-            lastLocalEditAt: new Date().toISOString(),
+            // IMPORTANT: no usamos "now" porque eso pisa cambios locales.
+            // Usamos el timestamp real del último sync.
+            lastLocalEditAt: user.lastStateAt?.toISOString() ?? new Date(0).toISOString(),
             categories: categories.map((c) => ({
                 id: c.id,
                 name: c.name,
                 sortOrder: c.sortOrder,
+                defaultSeconds: c.defaultSeconds ?? 25 * 60,
             })),
             tasks: tasks.map((t) => ({
                 id: t.id,
                 categoryId: t.categoryId,
                 title: t.title,
                 status: t.status,
+                priority: t.priority ?? 2,
                 sortOrder: t.sortOrder,
                 selectedAt: t.selectedAt?.toISOString() ?? null,
                 completedAt: t.completedAt?.toISOString() ?? null,
@@ -103,6 +114,7 @@ export async function GET() {
                 actualSeconds: b.actualSeconds,
                 startedAt: b.startedAt.toISOString(),
                 endedAt: b.endedAt?.toISOString() ?? null,
+                endReason: b.endReason ?? null,
                 allSelectedCompleted: b.allSelectedCompleted,
             })),
             selections: selections.map((s) => ({

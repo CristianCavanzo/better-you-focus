@@ -1,10 +1,11 @@
 export type TaskStatus = "PENDING" | "DONE" | "ARCHIVED";
-export type BlockStatus = "ACTIVE" | "COMPLETED";
+export type BlockStatus = "ACTIVE" | "COMPLETED" | "INTERRUPTED";
 
 export type Category = {
   id: string;
   name: string;
   sortOrder: number;
+  defaultSeconds?: number;
 };
 
 export type Task = {
@@ -12,6 +13,7 @@ export type Task = {
   categoryId: string;
   title: string;
   status: TaskStatus;
+  priority: number; // 1=Alta ... 4=Baja
   sortOrder: number;
   selectedAt?: string | null;
   completedAt?: string | null;
@@ -25,6 +27,7 @@ export type FocusBlock = {
   actualSeconds?: number | null;
   startedAt: string;
   endedAt?: string | null;
+  endReason?: string | null;
   allSelectedCompleted: boolean;
 };
 
