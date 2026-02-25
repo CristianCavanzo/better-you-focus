@@ -1,0 +1,44 @@
+{
+  "name": "better-you-focus",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@clerk/nextjs": "^5.7.2",
+    "@clerk/themes": "^2.3.2",
+    "@prisma/adapter-pg": "^7.4.1",
+    "@prisma/client": "^6.19.2",
+    "clsx": "^2.1.1",
+    "dotenv": "^17.3.1",
+    "framer-motion": "^11.11.7",
+    "lightweight-charts": "^4.2.1",
+    "lucide-react": "^0.477.0",
+    "next": "^14.2.24",
+    "pg": "^8.18.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/pg": "^8.16.0",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.24",
+    "postcss": "^8.4.45",
+    "prisma": "^6.19.2",
+    "tailwindcss": "^3.4.13",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.3"
+  }
+}

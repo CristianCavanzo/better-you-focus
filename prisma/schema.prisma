@@ -1,0 +1,190 @@
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+enum TaskStatus {
+    PENDING
+    DONE
+    ARCHIVED
+}
+
+enum BlockStatus {
+    ACTIVE
+    COMPLETED
+}
+
+model User {
+    id        String   @id @default(cuid())
+    createdAt DateTime @default(now())
+
+    categories  Category[]
+    tasks       Task[]
+    blocks      FocusBlock[]
+    panicEvents PanicEvent[]
+    dailyLogs   DailyLog[]
+    phrases     MotivationPhrase[]
+    rituals     Ritual[]
+}
+
+model Category {
+    id        String   @id @default(cuid())
+    userId    String?
+    name      String
+    sortOrder Int      @default(0)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    user        User?        @relation(fields: [userId], references: [id])
+    tasks       Task[]
+    blocks      FocusBlock[]
+    panicEvents PanicEvent[]
+
+    @@index([userId])
+}
+
+model Task {
+    id          String     @id @default(cuid())
+    userId      String?
+    categoryId  String
+    title       String
+    status      TaskStatus @default(PENDING)
+    sortOrder   Int        @default(0)
+    selectedAt  DateTime?
+    completedAt DateTime?
+    createdAt   DateTime   @default(now())
+    updatedAt   DateTime   @updatedAt
+
+    user       User?                 @relation(fields: [userId], references: [id])
+    category   Category              @relation(fields: [categoryId], references: [id])
+    selections FocusBlockSelection[]
+
+    @@index([categoryId, status, sortOrder])
+    @@index([userId])
+}
+
+model FocusBlock {
+    id                   String      @id @default(cuid())
+    userId               String?
+    categoryId           String
+    status               BlockStatus @default(ACTIVE)
+    plannedSeconds       Int
+    actualSeconds        Int?
+    startedAt            DateTime    @default(now())
+    endedAt              DateTime?
+    allSelectedCompleted Boolean     @default(false)
+
+    user       User?                 @relation(fields: [userId], references: [id])
+    category   Category              @relation(fields: [categoryId], references: [id])
+    selections FocusBlockSelection[]
+
+    @@index([categoryId, startedAt])
+    @@index([userId])
+}
+
+model FocusBlockSelection {
+    id        String    @id @default(cuid())
+    blockId   String
+    taskId    String
+    sortOrder Int       @default(0)
+    doneAt    DateTime?
+
+    block FocusBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+    task  Task       @relation(fields: [taskId], references: [id])
+
+    @@unique([blockId, taskId])
+    @@index([blockId, sortOrder])
+}
+
+enum MotivationCategory {
+    DISCIPLINA
+    PROPOSITO_FINANCIERO
+    INDEPENDENCIA_EMOCIONAL
+    CRECIMIENTO_PROFESIONAL
+}
+
+enum RitualStepType {
+    BREATHING
+    VISUALIZATION
+    IF_THEN
+    CUSTOM
+}
+
+model PanicEvent {
+    id           String   @id @default(cuid())
+    userId       String
+    categoryId   String?
+    urge         Int?
+    emotion      String?
+    chosenAction String?
+    createdAt    DateTime @default(now())
+
+    user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    category Category? @relation(fields: [categoryId], references: [id])
+
+    @@index([userId, createdAt])
+    @@index([categoryId])
+}
+
+model DailyLog {
+    id              String   @id @default(cuid())
+    userId          String
+    dateKey         String // YYYY-MM-DD
+    urge            Int?
+    emotion         String?
+    energy          Int?
+    valueActionDone Boolean  @default(false)
+    nextStep        String?
+    createdAt       DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, dateKey])
+    @@index([userId, createdAt])
+}
+
+model MotivationPhrase {
+    id        String             @id @default(cuid())
+    userId    String
+    category  MotivationCategory
+    text      String
+    ifThen    String?
+    active    Boolean            @default(true)
+    createdAt DateTime           @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId, category, active])
+}
+
+model Ritual {
+    id        String   @id @default(cuid())
+    userId    String
+    name      String
+    isActive  Boolean  @default(true)
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+    steps RitualStep[]
+
+    @@index([userId, isActive])
+}
+
+model RitualStep {
+    id          String         @id @default(cuid())
+    ritualId    String
+    type        RitualStepType
+    title       String
+    description String?
+    seconds     Int?
+    sortOrder   Int            @default(0)
+
+    ritual Ritual @relation(fields: [ritualId], references: [id], onDelete: Cascade)
+
+    @@index([ritualId, sortOrder])
+}

@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  /* Dark banking / TradingView-ish palette */
+  --bg: 10 10 14;           /* near-black */
+  --surface: 18 18 24;      /* card */
+  --surface2: 12 12 18;     /* inner */
+  --text: 238 240 247;
+  --muted: 151 156 171;
+  --border: 255 255 255;
+  --accent: 167 139 250;    /* purple */
+  --accent2: 99 102 241;    /* indigo */
+  color-scheme: dark;
+}
+
+html, body{ height:100%; }
+
+body{
+  margin:0;
+  background:
+    radial-gradient(1000px 600px at 20% 10%, rgba(167,139,250,.18), transparent 55%),
+    radial-gradient(900px 700px at 85% 25%, rgba(99,102,241,.12), transparent 50%),
+    rgb(var(--bg));
+  color: rgb(var(--text));
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+*{ box-sizing:border-box; }
+a{ color: inherit; text-decoration:none; }
