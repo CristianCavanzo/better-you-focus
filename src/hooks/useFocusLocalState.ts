@@ -1,105 +1,111 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useState } from 'react';
-import { FocusState } from '@/src/types/focus';
-import { makeInitialState } from '@/src/lib/focusLogic';
+import { useCallback, useEffect, useState } from "react";
+import { FocusState } from "@/src/types/focus";
+import { makeInitialState } from "@/src/lib/focusLogic";
 
-const KEY = 'better-you-focus.state.v1';
+const KEY = "better-you-focus.state.v1";
 
-function normalizeState(raw: any): FocusState {
-    const base = makeInitialState();
-    const s = raw as FocusState;
+function byId<T extends { id: string }>(arr: T[]) {
+  return new Map(arr.map((x) => [x.id, x] as const));
+}
 
-    const categories = (s.categories ?? base.categories).map(
-        (c: any, idx: number) => ({
-            id: String(c.id ?? base.categories[idx]?.id ?? 'c' + idx),
-            name: String(c.name ?? 'Grupo'),
-            sortOrder: Number.isFinite(c.sortOrder) ? Number(c.sortOrder) : idx,
-            defaultSeconds: Number.isFinite(c.defaultSeconds)
-                ? Number(c.defaultSeconds)
-                : 25 * 60,
-        }),
-    );
+function mergeMissing(local: FocusState, server: FocusState): FocusState {
+  const cats = byId(local.categories);
+  const tasks = byId(local.tasks);
+  const blocks = byId(local.blocks);
+  const sels = byId(local.selections);
 
-    const tasks = (s.tasks ?? base.tasks).map((t: any, idx: number) => ({
-        id: String(t.id ?? 't' + idx),
-        categoryId: String(t.categoryId ?? categories[0]?.id),
-        title: String(t.title ?? 'Task'),
-        status: (t.status ?? 'PENDING') as any,
-        sortOrder: Number.isFinite(t.sortOrder) ? Number(t.sortOrder) : idx,
-        priority: (Number.isFinite(t.priority) ? Number(t.priority) : 2) as any,
-        notes: t.notes ?? null,
-        selectedAt: t.selectedAt ?? null,
-        completedAt: t.completedAt ?? null,
-    }));
+  const merged: FocusState = {
+    ...local,
+    categories: [...local.categories],
+    tasks: [...local.tasks],
+    blocks: [...local.blocks],
+    selections: [...local.selections]
+  };
 
-    const blocks = (s.blocks ?? []).map((b: any) => ({
-        id: String(b.id),
-        categoryId: String(b.categoryId),
-        status: (b.status ?? 'COMPLETED') as any,
-        plannedSeconds: Number(b.plannedSeconds ?? 25 * 60),
-        actualSeconds: b.actualSeconds ?? null,
-        startedAt: b.startedAt ?? null,
-        endedAt: b.endedAt ?? null,
-        endReason: b.endReason ?? null,
-        allSelectedCompleted: Boolean(b.allSelectedCompleted),
-    }));
+  for (const c of server.categories) {
+    if (!cats.has(c.id)) merged.categories.push(c);
+  }
+  for (const t of server.tasks) {
+    if (!tasks.has(t.id)) merged.tasks.push(t);
+  }
+  for (const b of server.blocks) {
+    if (!blocks.has(b.id)) merged.blocks.push(b);
+  }
+  for (const s of server.selections) {
+    if (!sels.has(s.id)) merged.selections.push(s);
+  }
 
-    const selections = (s.selections ?? []).map((x: any, idx: number) => ({
-        id: String(x.id ?? 's' + idx),
-        blockId: String(x.blockId),
-        taskId: String(x.taskId),
-        sortOrder: Number.isFinite(x.sortOrder) ? Number(x.sortOrder) : idx,
-        doneAt: x.doneAt ?? null,
-    }));
-
-    return {
-        version: 1,
-        lastLocalEditAt: String(s.lastLocalEditAt ?? base.lastLocalEditAt),
-        categories,
-        tasks,
-        blocks,
-        selections,
-    };
+  // no tocamos lastLocalEditAt local
+  return merged;
 }
 
 export function useFocusLocalState() {
-    const [state, setState] = useState<FocusState>(() => makeInitialState());
+  const [state, setState] = useState<FocusState>(() => makeInitialState());
 
-    useEffect(() => {
-        try {
-            const raw = localStorage.getItem(KEY);
-            if (!raw) return;
-            const parsed = JSON.parse(raw);
-            if (parsed?.version === 1) setState(normalizeState(parsed));
-        } catch {
-            // ignore
-        }
-    }, []);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as FocusState;
+      if (parsed?.version === 1) setState(parsed);
+    } catch {
+      // ignore
+    }
+  }, []);
 
-    useEffect(() => {
-        try {
-            localStorage.setItem(KEY, JSON.stringify(state));
-        } catch {
-            // ignore
-        }
-    }, [state]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+  }, [state]);
 
-    const hydrateFromServer = useCallback(async () => {
-        const res = await fetch('/api/focus/state', { method: 'GET' });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!data?.ok?.toString()) return;
+  // Auto-sync (baja fricción): guarda cambios al server con debounce.
+  // Nota: el timer no vive en FocusState, así que no dispara cada segundo.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      fetch("/api/focus/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ state })
+      }).catch(() => {});
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.lastLocalEditAt]);
 
-        const server = normalizeState(data.state);
-        const local = state;
+  const hydrateFromServer = useCallback(async () => {
+    const res = await fetch("/api/focus/state", { method: "GET" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data?.ok?.toString()) return;
 
-        const localTs = Date.parse(local.lastLocalEditAt || '0');
-        const serverTs = Date.parse(server.lastLocalEditAt || '0');
+    const server = data.state as FocusState;
+    const local = state;
 
-        // If server snapshot is newer than local, hydrate.
-        if (Number.isFinite(serverTs) && serverTs > localTs) setState(server);
-    }, [state]);
+    const localTs = Date.parse(local.lastLocalEditAt || "0");
+    const serverTs = Date.parse(server.lastLocalEditAt || "0");
 
-    return { state, setState, hydrateFromServer };
+    // Si server está más nuevo, pisa.
+    if (Number.isFinite(serverTs) && serverTs > localTs) {
+      setState(server);
+      return;
+    }
+
+    // Si local está más nuevo, no pises, pero trae entidades nuevas del server (ej: check-in creó task).
+    const merged = mergeMissing(local, server);
+    if (
+      merged.categories.length !== local.categories.length ||
+      merged.tasks.length !== local.tasks.length ||
+      merged.blocks.length !== local.blocks.length ||
+      merged.selections.length !== local.selections.length
+    ) {
+      setState(merged);
+    }
+  }, [state]);
+
+  return { state, setState, hydrateFromServer };
 }

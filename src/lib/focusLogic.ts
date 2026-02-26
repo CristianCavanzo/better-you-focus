@@ -1,12 +1,10 @@
-import { FocusState, TaskStatus, BlockStatus, Task } from "@/src/types/focus";
+import { BlockStatus, FocusState, RepeatCadence, TaskStatus } from "@/src/types/focus";
 import { cuidLike, nowIso } from "@/src/lib/ids";
 
-const DEFAULT_SECONDS = 25 * 60;
-
 export const DEFAULT_CATEGORIES = [
-  { id: "work", name: "Trabajo", sortOrder: 0, defaultSeconds: DEFAULT_SECONDS },
-  { id: "study", name: "Estudio", sortOrder: 1, defaultSeconds: DEFAULT_SECONDS },
-  { id: "gym", name: "Gym", sortOrder: 2, defaultSeconds: DEFAULT_SECONDS }
+  { id: "work", name: "Trabajo", sortOrder: 0, defaultSeconds: 25 * 60 },
+  { id: "study", name: "Estudio", sortOrder: 1, defaultSeconds: 25 * 60 },
+  { id: "gym", name: "Gym", sortOrder: 2, defaultSeconds: 25 * 60 }
 ];
 
 export function makeInitialState(): FocusState {
@@ -16,29 +14,58 @@ export function makeInitialState(): FocusState {
     lastLocalEditAt: now,
     categories: DEFAULT_CATEGORIES,
     tasks: [
+      // demo tasks
       {
         id: "t1",
         categoryId: "work",
         title: "Abrir repo y elegir 1 tarea",
+        notes: null,
+        priority: 1,
+        dueAt: null,
+        estimateMinutes: 5,
+        repeatCadence: "NONE",
+        repeatTime: null,
         status: "PENDING",
-        sortOrder: 0,
-        priority: 2
+        sortOrder: 0
       },
       {
         id: "t2",
         categoryId: "work",
         title: "Implementar 1 cambio pequeño",
+        notes: null,
+        priority: 2,
+        dueAt: null,
+        estimateMinutes: 25,
+        repeatCadence: "NONE",
+        repeatTime: null,
         status: "PENDING",
-        sortOrder: 1,
-        priority: 2
+        sortOrder: 1
       },
       {
         id: "t3",
         categoryId: "study",
-        title: "Leer 10 min (1 tema)",
+        title: "Leer 15 min (repetida)",
+        notes: null,
+        priority: 2,
+        dueAt: null,
+        estimateMinutes: 15,
+        repeatCadence: "WEEKDAYS",
+        repeatTime: "08:00",
         status: "PENDING",
-        sortOrder: 0,
-        priority: 3
+        sortOrder: 0
+      },
+      {
+        id: "t4",
+        categoryId: "gym",
+        title: "Calentamiento 5 min",
+        notes: null,
+        priority: 3,
+        dueAt: null,
+        estimateMinutes: 5,
+        repeatCadence: "NONE",
+        repeatTime: null,
+        status: "PENDING",
+        sortOrder: 0
       }
     ],
     blocks: [],
@@ -61,106 +88,101 @@ export function addCategory(state: FocusState, name: string): FocusState {
         id,
         name: name.trim() || "Nueva categoría",
         sortOrder,
-        defaultSeconds: DEFAULT_SECONDS
+        defaultSeconds: 25 * 60
       }
     ]
   });
 }
 
-export function setCategoryDefaultSeconds(state: FocusState, categoryId: string, seconds: number): FocusState {
-  const safe = Math.max(5 * 60, Math.min(4 * 60 * 60, Math.floor(seconds)));
-  const categories = state.categories.map((c) => (c.id === categoryId ? { ...c, defaultSeconds: safe } : c));
-  return touch({ ...state, categories });
-}
-
-function nextTaskSortOrder(state: FocusState, categoryId: string) {
-  const existing = state.tasks.filter((t) => t.categoryId === categoryId);
-  return existing.length ? Math.max(...existing.map((t) => t.sortOrder)) + 1 : 0;
+export function updateCategoryDefaultSeconds(
+  state: FocusState,
+  categoryId: string,
+  defaultSeconds: number
+): FocusState {
+  const next = state.categories.map((c) =>
+    c.id === categoryId ? { ...c, defaultSeconds: clamp(defaultSeconds, 60, 4 * 60 * 60) } : c
+  );
+  return touch({ ...state, categories: next });
 }
 
 export function addTask(
   state: FocusState,
   categoryId: string,
   title: string,
-  opts?: { priority?: 1 | 2 | 3 | 4; notes?: string | null }
+  opts?: {
+    priority?: number;
+    notes?: string | null;
+    dueAt?: string | null;
+    estimateMinutes?: number | null;
+    repeatCadence?: RepeatCadence;
+    repeatTime?: string | null;
+    addToCurrentBlock?: boolean;
+    blockId?: string | null;
+  }
 ): FocusState {
   const id = cuidLike();
-  const sortOrder = nextTaskSortOrder(state, categoryId);
-  const priority = opts?.priority ?? 2;
-  return touch({
-    ...state,
-    tasks: [
-      ...state.tasks,
-      {
-        id,
-        categoryId,
-        title: title.trim() || "Nueva tarea",
-        status: "PENDING",
-        sortOrder,
-        priority,
-        notes: opts?.notes ?? null
-      }
-    ]
-  });
+  const existing = state.tasks.filter((t) => t.categoryId === categoryId);
+  const sortOrder = existing.length ? Math.max(...existing.map((t) => t.sortOrder)) + 1 : 0;
+
+  const task = {
+    id,
+    categoryId,
+    title: title.trim() || "Nueva tarea",
+    notes: opts?.notes ?? null,
+    priority: clampInt(opts?.priority ?? 2, 1, 4),
+    dueAt: opts?.dueAt ?? null,
+    estimateMinutes: opts?.estimateMinutes ?? null,
+    repeatCadence: (opts?.repeatCadence ?? "NONE") as RepeatCadence,
+    repeatTime: opts?.repeatTime ?? null,
+    status: "PENDING" as const,
+    sortOrder
+  };
+
+  let nextState = touch({ ...state, tasks: [...state.tasks, task] });
+
+  const blockId = opts?.blockId ?? null;
+  if (opts?.addToCurrentBlock && blockId) {
+    nextState = addTaskToBlock(nextState, blockId, id);
+  }
+
+  return nextState;
 }
 
-export function addTaskAndSelect(
-  state: FocusState,
-  categoryId: string,
-  title: string,
-  blockId: string | null,
-  opts?: { priority?: 1 | 2 | 3 | 4; notes?: string | null }
-): FocusState {
-  const id = cuidLike();
-  const sortOrder = nextTaskSortOrder(state, categoryId);
-  const priority = opts?.priority ?? 2;
-  const now = nowIso();
-
-  let next: FocusState = touch({
-    ...state,
-    tasks: [
-      ...state.tasks,
-      {
-        id,
-        categoryId,
-        title: title.trim() || "Nueva tarea",
-        status: "PENDING",
-        sortOrder,
-        priority,
-        notes: opts?.notes ?? null,
-        selectedAt: blockId ? now : null
-      }
-    ]
-  });
-
-  if (blockId) next = addTaskToBlock(next, blockId, id);
-  return next;
-}
-
-export function setTaskPriority(state: FocusState, taskId: string, priority: 1 | 2 | 3 | 4): FocusState {
-  const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, priority } : t));
+export function updateTaskPriority(state: FocusState, taskId: string, priority: number): FocusState {
+  const p = clampInt(priority, 1, 4);
+  const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, priority: p } : t));
   return touch({ ...state, tasks });
 }
 
-export function moveTaskToCategory(state: FocusState, taskId: string, categoryId: string): FocusState {
-  const now = nowIso();
-  const sortOrder = nextTaskSortOrder(state, categoryId);
+export function updateTaskDueAt(state: FocusState, taskId: string, dueAt: string | null): FocusState {
+  const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, dueAt } : t));
+  return touch({ ...state, tasks });
+}
+
+export function updateTaskEstimate(state: FocusState, taskId: string, estimateMinutes: number | null): FocusState {
+  const v = estimateMinutes == null ? null : clampInt(estimateMinutes, 1, 8 * 60);
+  const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, estimateMinutes: v } : t));
+  return touch({ ...state, tasks });
+}
+
+export function updateTaskRepeat(
+  state: FocusState,
+  taskId: string,
+  repeatCadence: RepeatCadence,
+  repeatTime?: string | null
+): FocusState {
+  const cad: RepeatCadence = (repeatCadence ?? "NONE") as RepeatCadence;
+  const rt = cad === "NONE" ? null : (repeatTime ?? null);
   const tasks = state.tasks.map((t) =>
-    t.id === taskId
-      ? {
-          ...t,
-          categoryId,
-          sortOrder,
-          // mover de categoría invalida selección actual si existe
-          selectedAt: null,
-          completedAt: t.status === "DONE" ? t.completedAt ?? now : null
-        }
-      : t
+    t.id === taskId ? { ...t, repeatCadence: cad, repeatTime: rt } : t
   );
+  return touch({ ...state, tasks });
+}
 
-  // quitar de selecciones existentes
+export function updateTaskCategory(state: FocusState, taskId: string, categoryId: string): FocusState {
+  const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, categoryId } : t));
+  // Si una task cambia de categoría, la sacamos de cualquier bloque para no mezclar
   const selections = state.selections.filter((s) => s.taskId !== taskId);
-
   return touch({ ...state, tasks, selections });
 }
 
@@ -189,20 +211,28 @@ export function getActiveBlock(state: FocusState) {
   return [...state.blocks].reverse().find((b) => b.status === "ACTIVE") ?? null;
 }
 
-export function getDraftBlockForCategory(state: FocusState, categoryId: string) {
-  return [...state.blocks]
-    .reverse()
-    .find((b) => b.status === "DRAFT" && b.categoryId === categoryId) ?? null;
+export function getDraftBlock(state: FocusState, categoryId: string) {
+  return (
+    [...state.blocks]
+      .reverse()
+      .find((b) => b.status === "DRAFT" && b.categoryId === categoryId) ?? null
+  );
 }
 
-export function ensureDraftBlock(state: FocusState, categoryId: string): FocusState {
+export function ensureDraftBlock(state: FocusState, categoryId: string, plannedSeconds: number): FocusState {
+  // no draft si ya hay un activo
   if (getActiveBlock(state)) return state;
 
-  const draft = getDraftBlockForCategory(state, categoryId);
-  if (draft) return state;
-
-  const cat = state.categories.find((c) => c.id === categoryId);
-  const plannedSeconds = cat?.defaultSeconds ?? DEFAULT_SECONDS;
+  const draft = getDraftBlock(state, categoryId);
+  if (draft) {
+    if (draft.plannedSeconds === plannedSeconds) return state;
+    return touch({
+      ...state,
+      blocks: state.blocks.map((b) =>
+        b.id === draft.id ? { ...b, plannedSeconds: plannedSeconds } : b
+      )
+    });
+  }
 
   const blockId = cuidLike();
   const block = {
@@ -217,98 +247,7 @@ export function ensureDraftBlock(state: FocusState, categoryId: string): FocusSt
     allSelectedCompleted: false
   };
 
-  // auto-preselect: 1 tarea prioridad 1 si existe, para reducir fricción
-  const pending = getPendingTasksForCategory(state, categoryId);
-  const critical = pending.find((t) => t.priority === 1);
-  const selections = critical
-    ? [
-        {
-          id: cuidLike(),
-          blockId,
-          taskId: critical.id,
-          sortOrder: 0,
-          doneAt: null
-        }
-      ]
-    : [];
-
-  const tasks = state.tasks.map((t) => (critical && t.id === critical.id ? { ...t, selectedAt: nowIso() } : t));
-
-  return touch({
-    ...state,
-    tasks,
-    blocks: [...state.blocks, block],
-    selections: [...state.selections, ...selections]
-  });
-}
-
-export function setDraftPlannedSeconds(state: FocusState, categoryId: string, seconds: number): FocusState {
-  const safe = Math.max(5 * 60, Math.min(4 * 60 * 60, Math.floor(seconds)));
-  const draft = getDraftBlockForCategory(state, categoryId);
-  if (!draft) return state;
-
-  const blocks = state.blocks.map((b) => (b.id === draft.id ? { ...b, plannedSeconds: safe } : b));
-  return touch({ ...state, blocks });
-}
-
-function nextSelectionOrder(state: FocusState, blockId: string) {
-  const existing = state.selections.filter((s) => s.blockId === blockId);
-  return existing.length ? Math.max(...existing.map((s) => s.sortOrder)) + 1 : 0;
-}
-
-export function isTaskSelectedInBlock(state: FocusState, blockId: string, taskId: string) {
-  return state.selections.some((s) => s.blockId === blockId && s.taskId === taskId);
-}
-
-export function addTaskToBlock(state: FocusState, blockId: string, taskId: string): FocusState {
-  if (isTaskSelectedInBlock(state, blockId, taskId)) return state;
-  const now = nowIso();
-  const order = nextSelectionOrder(state, blockId);
-
-  const selections = [
-    ...state.selections,
-    {
-      id: cuidLike(),
-      blockId,
-      taskId,
-      sortOrder: order,
-      doneAt: null
-    }
-  ];
-
-  const tasks = state.tasks.map((t) => (t.id === taskId ? { ...t, selectedAt: t.selectedAt ?? now } : t));
-
-  return touch({ ...state, tasks, selections });
-}
-
-export function removeTaskFromBlock(state: FocusState, blockId: string, taskId: string): FocusState {
-  const selections = state.selections.filter((s) => !(s.blockId === blockId && s.taskId === taskId));
-  // normalizamos sortOrder del bloque
-  const re = selections
-    .filter((s) => s.blockId === blockId)
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((s, idx) => ({ ...s, sortOrder: idx }));
-
-  const others = selections.filter((s) => s.blockId !== blockId);
-  return touch({ ...state, selections: [...others, ...re] });
-}
-
-export function reorderBlockTasks(state: FocusState, blockId: string, orderedTaskIds: string[]): FocusState {
-  const inBlock = state.selections.filter((s) => s.blockId === blockId);
-  const map = new Map(inBlock.map((s) => [s.taskId, s]));
-
-  const reordered = orderedTaskIds
-    .map((taskId, idx) => {
-      const s = map.get(taskId);
-      return s ? { ...s, sortOrder: idx } : null;
-    })
-    .filter(Boolean) as typeof inBlock;
-
-  // keep any that weren't included (safety)
-  const rest = inBlock.filter((s) => !orderedTaskIds.includes(s.taskId)).map((s) => ({ ...s, sortOrder: reordered.length }));
-
-  const others = state.selections.filter((s) => s.blockId !== blockId);
-  return touch({ ...state, selections: [...others, ...reordered, ...rest] });
+  return touch({ ...state, blocks: [...state.blocks, block] });
 }
 
 export function getBlockSelections(state: FocusState, blockId: string) {
@@ -322,7 +261,8 @@ export function getSelectedTasks(state: FocusState, blockId: string) {
   const byId = new Map(state.tasks.map((t) => [t.id, t]));
   return selections
     .map((s) => ({ selection: s, task: byId.get(s.taskId) }))
-    .filter((x): x is { selection: any; task: any } => !!x.task);
+    .filter((x): x is { selection: any; task: any } => !!x.task)
+    .sort((a, b) => compareTask(a.task, b.task) || (a.selection.sortOrder - b.selection.sortOrder));
 }
 
 export function getNextPendingSelection(state: FocusState, blockId: string) {
@@ -331,46 +271,116 @@ export function getNextPendingSelection(state: FocusState, blockId: string) {
   return next?.task?.id ?? null;
 }
 
-export function getPendingTasksForCategory(state: FocusState, categoryId: string): Task[] {
-  return state.tasks
-    .filter((t) => t.categoryId === categoryId && t.status === "PENDING")
-    .sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority - b.priority;
-      return a.sortOrder - b.sortOrder;
-    });
+export function isTaskInBlock(state: FocusState, blockId: string, taskId: string) {
+  return state.selections.some((s) => s.blockId === blockId && s.taskId === taskId);
 }
 
-export function startBlock(state: FocusState, categoryId: string): FocusState {
+export function addTaskToBlock(state: FocusState, blockId: string, taskId: string): FocusState {
+  if (isTaskInBlock(state, blockId, taskId)) return state;
+
+  const current = getBlockSelections(state, blockId);
+  const sortOrder = current.length ? Math.max(...current.map((s) => s.sortOrder)) + 1 : 0;
+
+  const sel = {
+    id: cuidLike(),
+    blockId,
+    taskId,
+    sortOrder,
+    doneAt: null
+  };
+
+  return touch({ ...state, selections: [...state.selections, sel] });
+}
+
+export function removeTaskFromBlock(state: FocusState, blockId: string, taskId: string): FocusState {
+  const selections = state.selections.filter((s) => !(s.blockId === blockId && s.taskId === taskId));
+  return touch({ ...state, selections });
+}
+
+export function toggleTaskInBlock(state: FocusState, blockId: string, taskId: string): FocusState {
+  return isTaskInBlock(state, blockId, taskId)
+    ? removeTaskFromBlock(state, blockId, taskId)
+    : addTaskToBlock(state, blockId, taskId);
+}
+
+export function startBlock(
+  state: FocusState,
+  categoryId: string,
+  plannedSeconds: number,
+  pickCount = 5
+): FocusState {
   const now = nowIso();
-  const draft = getDraftBlockForCategory(state, categoryId);
+  // Ensure draft exists
+  let next = ensureDraftBlock(state, categoryId, plannedSeconds);
+  const draft = getDraftBlock(next, categoryId);
   if (!draft) return state;
 
-  // si no hay tareas seleccionadas, auto-pick hasta 5
-  const selected = getBlockSelections(state, draft.id);
-  let nextState = state;
-  if (selected.length === 0) {
-    const pending = getPendingTasksForCategory(state, categoryId).slice(0, 5);
-    for (const t of pending) nextState = addTaskToBlock(nextState, draft.id, t.id);
+  const blockId = draft.id;
+
+  // If no selected tasks, auto pick
+  const existingSelections = getBlockSelections(next, blockId);
+  if (existingSelections.length === 0) {
+    const pending = next.tasks
+      .filter((t) => t.categoryId === categoryId && t.status === "PENDING")
+      .sort(compareTask)
+      .slice(0, pickCount);
+
+    const newSelections = pending.map((t, idx) => ({
+      id: cuidLike(),
+      blockId,
+      taskId: t.id,
+      sortOrder: idx,
+      doneAt: null
+    }));
+
+    const tasks = next.tasks.map((t) =>
+      pending.some((p) => p.id === t.id) ? { ...t, selectedAt: now } : t
+    );
+
+    next = { ...next, tasks, selections: [...next.selections, ...newSelections] };
   }
 
-  const blocks = nextState.blocks.map((b) =>
-    b.id === draft.id
-      ? ({
-          ...b,
-          status: "ACTIVE" as const,
-          startedAt: now,
-          endedAt: null,
-          actualSeconds: null,
-          endReason: null,
-          allSelectedCompleted: false
-        } as any)
-      : b
-  );
+  // Activate block
+  next = {
+    ...next,
+    blocks: next.blocks.map((b) =>
+      b.id === blockId
+        ? ({
+            ...b,
+            status: "ACTIVE" as BlockStatus,
+            plannedSeconds,
+            startedAt: now,
+            endedAt: null,
+            endReason: null,
+            actualSeconds: null
+          } as any)
+        : b
+    )
+  };
 
-  return touch({ ...nextState, blocks });
+  return touch(next);
 }
 
-export function endBlock(state: FocusState, blockId: string, actualSeconds: number): FocusState {
+export function compareTask(a: any, b: any) {
+  // 1) prioridad (1 alta)
+  const p = (a.priority ?? 2) - (b.priority ?? 2);
+  if (p !== 0) return p;
+
+  // 2) dueAt (más cercano primero; null al final)
+  const ad = a.dueAt ? Date.parse(a.dueAt) : Number.POSITIVE_INFINITY;
+  const bd = b.dueAt ? Date.parse(b.dueAt) : Number.POSITIVE_INFINITY;
+  if (ad !== bd) return ad - bd;
+
+  // 3) sortOrder estable
+  return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+}
+
+export function endBlock(
+  state: FocusState,
+  blockId: string,
+  actualSeconds: number,
+  opts?: { status?: Exclude<BlockStatus, "DRAFT">; reason?: string | null }
+): FocusState {
   const now = nowIso();
   const block = state.blocks.find((b) => b.id === blockId);
   if (!block) return state;
@@ -378,52 +388,30 @@ export function endBlock(state: FocusState, blockId: string, actualSeconds: numb
   const blockSelections = getBlockSelections(state, blockId);
   const allDone = blockSelections.length > 0 && blockSelections.every((s) => !!s.doneAt);
 
+  const status: BlockStatus = opts?.status ?? "COMPLETED";
+
   const blocks = state.blocks.map((b) =>
     b.id === blockId
-      ? {
+      ? ({
           ...b,
-          status: "COMPLETED" as const,
+          status,
           actualSeconds,
           endedAt: now,
+          endReason: (opts?.reason ?? null) || null,
           allSelectedCompleted: allDone
-        }
+        } as any)
       : b
   );
 
   return touch({ ...state, blocks });
 }
 
-export function interruptBlock(state: FocusState, blockId: string, actualSeconds: number, reason: string): FocusState {
-  const now = nowIso();
-  const block = state.blocks.find((b) => b.id === blockId);
-  if (!block) return state;
-
-  const blocks = state.blocks.map((b) =>
-    b.id === blockId
-      ? {
-          ...b,
-          status: "INTERRUPTED" as const,
-          actualSeconds,
-          endedAt: now,
-          endReason: reason.slice(0, 240) || "Interrumpido"
-        }
-      : b
-  );
-
-  return touch({ ...state, blocks });
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v));
 }
 
-export function getEditableBlockId(state: FocusState, categoryId: string): string | null {
-  const active = getActiveBlock(state);
-  if (active) return active.id;
-  const draft = getDraftBlockForCategory(state, categoryId);
-  return draft?.id ?? null;
-}
-
-export function getBlockById(state: FocusState, blockId: string) {
-  return state.blocks.find((b) => b.id === blockId) ?? null;
-}
-
-export function getCategoryById(state: FocusState, categoryId: string) {
-  return state.categories.find((c) => c.id === categoryId) ?? null;
+function clampInt(v: number, min: number, max: number) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return min;
+  return clamp(n, min, max);
 }

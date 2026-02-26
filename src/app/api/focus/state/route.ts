@@ -4,6 +4,20 @@ import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 
+function dateKeyBogota(d: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(d);
+}
+
+function isWeekdayBogota(d: Date) {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: "America/Bogota", weekday: "short" }).format(d);
+  return wd !== "Sat" && wd !== "Sun";
+}
+
 async function getUserIdOrNull(): Promise<string | null> {
   const { userId } = auth();
   return userId ?? null;
@@ -11,15 +25,21 @@ async function getUserIdOrNull(): Promise<string | null> {
 
 export async function GET() {
   const userId = await getUserIdOrNull();
+
+  // demo single-user: usamos un user "demo" si no hay auth
   const effectiveUserId = userId ?? "demo";
 
-  // ensure user exists
+  // asegura user
   const user = await prisma.user.upsert({
     where: { id: effectiveUserId },
     update: {},
-    create: { id: effectiveUserId }
+    create: { id: effectiveUserId },
+    select: { id: true, lastStateAt: true }
   });
 
+  let lastStateAt = user.lastStateAt;
+
+  // carga todo
   const [categories, tasks, blocks, selections] = await Promise.all([
     prisma.category.findMany({
       where: { userId: effectiveUserId },
@@ -39,7 +59,41 @@ export async function GET() {
     })
   ]);
 
-  // initialize defaults if empty (DB-backed)
+  // Repetición: resetea tasks repetidas (DONE ayer → PENDING hoy)
+  // (Esto corre en el server para que el usuario NO tenga que “duplicar tasks” manualmente.)
+  const todayKey = dateKeyBogota(new Date());
+  const isWeekday = isWeekdayBogota(new Date());
+  const toReset = tasks.filter((t) => {
+    if (t.status !== "DONE") return false;
+    if (!t.completedAt) return false;
+    if (t.repeatCadence === "NONE") return false;
+    if (t.repeatCadence === "WEEKDAYS" && !isWeekday) return false;
+    const doneKey = dateKeyBogota(t.completedAt);
+    return doneKey < todayKey;
+  });
+
+  if (toReset.length) {
+    await prisma.task.updateMany({
+      where: { id: { in: toReset.map((t) => t.id) } },
+      data: { status: "PENDING", completedAt: null, selectedAt: null }
+    });
+
+    // bump watermark so el cliente re-hidrate (esto es un cambio server-side)
+    lastStateAt = new Date();
+    await prisma.user.update({
+      where: { id: effectiveUserId },
+      data: { lastStateAt }
+    });
+
+    // recarga tasks con cambios (solo si realmente reseteamos)
+    const refreshed = await prisma.task.findMany({
+      where: { userId: effectiveUserId },
+      orderBy: [{ categoryId: "asc" }, { priority: "asc" }, { sortOrder: "asc" }]
+    });
+    tasks.splice(0, tasks.length, ...refreshed);
+  }
+
+  // si está vacío, inicializa con defaults (en DB) para que Sync sea consistente
   if (categories.length === 0 && tasks.length === 0 && blocks.length === 0) {
     const initial = makeInitialState();
 
@@ -55,6 +109,7 @@ export async function GET() {
           }
         });
       }
+
       for (const t of initial.tasks) {
         await tx.task.create({
           data: {
@@ -62,19 +117,22 @@ export async function GET() {
             userId: effectiveUserId,
             categoryId: t.categoryId,
             title: t.title,
-            status: t.status,
-            sortOrder: t.sortOrder,
+            notes: t.notes ?? null,
             priority: t.priority,
-            notes: t.notes ?? null
+            dueAt: t.dueAt ? new Date(t.dueAt) : null,
+            estimateMinutes: t.estimateMinutes ?? null,
+            repeatCadence: (t.repeatCadence as any) ?? "NONE",
+            repeatTime: t.repeatTime ?? null,
+            status: t.status,
+            sortOrder: t.sortOrder
           }
         });
       }
-    });
 
-    // we just seeded -> server snapshot matches now
-    await prisma.user.update({
-      where: { id: effectiveUserId },
-      data: { lastStateAt: new Date(initial.lastLocalEditAt) }
+      await tx.user.update({
+        where: { id: effectiveUserId },
+        data: { lastStateAt: new Date(initial.lastLocalEditAt) }
+      });
     });
 
     return NextResponse.json({ ok: true, state: initial });
@@ -84,8 +142,7 @@ export async function GET() {
     ok: true,
     state: {
       version: 1,
-      // critical: MUST be stable, otherwise hydrate will overwrite local edits.
-      lastLocalEditAt: user.lastStateAt.toISOString(),
+      lastLocalEditAt: lastStateAt.toISOString(),
       categories: categories.map((c) => ({
         id: c.id,
         name: c.name,
@@ -96,10 +153,14 @@ export async function GET() {
         id: t.id,
         categoryId: t.categoryId,
         title: t.title,
+        notes: t.notes ?? null,
+        priority: t.priority,
+        dueAt: t.dueAt?.toISOString() ?? null,
+        estimateMinutes: t.estimateMinutes ?? null,
+        repeatCadence: (t.repeatCadence as any) ?? "NONE",
+        repeatTime: t.repeatTime ?? null,
         status: t.status,
         sortOrder: t.sortOrder,
-        priority: (t.priority as any) ?? 2,
-        notes: t.notes ?? null,
         selectedAt: t.selectedAt?.toISOString() ?? null,
         completedAt: t.completedAt?.toISOString() ?? null
       })),

@@ -1,21 +1,27 @@
 import { prisma } from "@/src/lib/prisma";
 
-function dayKey(d: Date) {
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+function dayKeyBogota(d: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(d);
 }
 
 export async function getDashboardStats(userId: string, days = 14) {
   const now = new Date();
   const start = new Date(now);
-  start.setUTCDate(start.getUTCDate() - (days - 1));
-  start.setUTCHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  start.setHours(0, 0, 0, 0);
 
   const [blocks, panic] = await Promise.all([
     prisma.focusBlock.findMany({
-      where: { userId, endedAt: { not: null }, startedAt: { gte: start } },
+      where: {
+        userId,
+        endedAt: { not: null },
+        startedAt: { not: null, gte: start }
+      },
       orderBy: { startedAt: "asc" }
     }),
     prisma.panicEvent.findMany({
@@ -29,18 +35,19 @@ export async function getDashboardStats(userId: string, days = 14) {
 
   for (let i = 0; i < days; i++) {
     const d = new Date(start);
-    d.setUTCDate(start.getUTCDate() + i);
-    focusByDay.set(dayKey(d), 0);
-    panicByDay.set(dayKey(d), 0);
+    d.setDate(start.getDate() + i);
+    focusByDay.set(dayKeyBogota(d), 0);
+    panicByDay.set(dayKeyBogota(d), 0);
   }
 
   for (const b of blocks) {
-    const key = dayKey(b.startedAt);
+    if (!b.startedAt) continue;
+    const key = dayKeyBogota(b.startedAt);
     const seconds = b.actualSeconds ?? b.plannedSeconds;
     focusByDay.set(key, (focusByDay.get(key) ?? 0) + seconds);
   }
   for (const p of panic) {
-    const key = dayKey(p.createdAt);
+    const key = dayKeyBogota(p.createdAt);
     panicByDay.set(key, (panicByDay.get(key) ?? 0) + 1);
   }
 

@@ -13,6 +13,13 @@ enum TaskStatus {
   ARCHIVED
 }
 
+// Repetición simple (hábitos diarios / weekdays)
+enum RepeatCadence {
+  NONE
+  DAILY
+  WEEKDAYS
+}
+
 enum BlockStatus {
   ACTIVE
   COMPLETED
@@ -71,20 +78,28 @@ model Category {
 }
 
 model Task {
-  id          String     @id @default(cuid())
-  userId      String?
-  categoryId  String
-  title       String
-  notes       String?
+  id              String        @id @default(cuid())
+  userId          String?
+  categoryId      String
+  title           String
+  notes           String?
   // 1=Alta, 4=Baja
-  priority    Int        @default(2)
-  status      TaskStatus @default(PENDING)
-  sortOrder   Int        @default(0)
-  selectedAt  DateTime?
-  completedAt DateTime?
-  dailyLogId  String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  priority        Int           @default(2)
+  // Fecha/hora límite (para planificar hoy/mañana antes de X hora)
+  dueAt           DateTime?
+  // Estimación rápida (minutos)
+  estimateMinutes Int?
+  // Acciones repetidas (ej: leer 15 min)
+  repeatCadence   RepeatCadence @default(NONE)
+  // Hora sugerida HH:MM (opcional)
+  repeatTime      String?
+  status          TaskStatus    @default(PENDING)
+  sortOrder       Int           @default(0)
+  selectedAt      DateTime?
+  completedAt     DateTime?
+  dailyLogId      String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   user       User?                 @relation(fields: [userId], references: [id])
   category   Category              @relation(fields: [categoryId], references: [id])
@@ -92,6 +107,8 @@ model Task {
   dailyLog   DailyLog?             @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
 
   @@index([categoryId, status, priority, sortOrder])
+  @@index([userId, dueAt])
+  @@index([userId, repeatCadence])
   @@index([userId])
   @@index([dailyLogId])
 }
