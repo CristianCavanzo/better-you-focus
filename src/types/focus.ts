@@ -23,6 +23,10 @@ export type Task = {
     notes?: string | null;
     selectedAt?: string | null;
     completedAt?: string | null;
+    dueAt?: string | null;
+    estimateMinutes: number | null;
+    repeatCadence?: string | null;
+    repeatTime: string | null;
 };
 
 export type FocusBlock = {
